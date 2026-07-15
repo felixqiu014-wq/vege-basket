@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-07-10T09:03:53Z",
+  "generated_at": "2026-07-14T14:41:30Z",
   "project": {
     "github_url": "git@github.com:felixqiu014-wq/vege-basket.git",
     "work_dir": "/Users/felixqiu/Documents/vege-basket",
     "repo_name": "vege-basket",
-    "branch": "vege-oss"
+    "branch": "main"
   },
   "score": {
     "total": 8,
@@ -125,5 +125,5 @@
   },
   "has_dockerfile": true,
   "complexity_tier": "L2",
-  "image_ref": "ghcr.io/felixqiu014-wq/vege-basket:20260713-101729"
+  "image_ref": "ghcr.io/felixqiu014-wq/vege-basket:20260715-121459"
 }

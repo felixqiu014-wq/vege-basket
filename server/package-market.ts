@@ -5,13 +5,19 @@ import { fileURLToPath } from 'node:url'
 import * as yaml from 'js-yaml'
 
 export type PackageMarketRule = {
-  category: 'apps' | 'middleware'
+  category: 'apps' | 'middleware' | 'dependency'
   ciFileNameFormats: string[]
+  dependencyFilePatterns: string[]
+  dependencyRoots: string[]
   fileNameFormats: string[]
+  flatFileNamePrefix: string
+  flatFileNameSuffix: string
+  flatFileNameSuffixes: string[]
   flatFileRoots: string[]
   id: string
   mode: 'release' | 'flat' | 'mixed' | 'pro-middleware'
   name: string
+  parent: string
   releaseRoots: string[]
 }
 
@@ -38,6 +44,7 @@ export type PackageMarketDetail = {
   links: PackageMarketLink[]
   meta: Array<{ label: string; value: string }>
   releaseVersions?: PackageMarketVersion[]
+  selectedHash?: string
   title: string
   type: string
 }
@@ -56,9 +63,12 @@ const downloadExpireSeconds = Number(
     30 * 60,
 )
 export const packageMarketExpireMinuteOptions = [30, 60, 90, 120, 300, 600] as const
-const middlewareRoot = normalizePrefix(
-  process.env.PACKAGE_MARKET_MIDDLEWARE_ROOT ?? process.env.OSS_UI_MIDDLEWARE_ROOT,
-)
+const defaultMiddlewareRoot = 'offline/sealos-pro/'
+const middlewareRoots = normalizeList([
+  process.env.PACKAGE_MARKET_MIDDLEWARE_ROOT,
+  process.env.OSS_UI_MIDDLEWARE_ROOT,
+  defaultMiddlewareRoot,
+]).map(normalizePrefix)
 const baseObjectTemplate = normalizeString(
   process.env.PACKAGE_MARKET_BASE_OBJECT_TEMPLATE ?? process.env.OSS_UI_BASE_OBJECT_TEMPLATE,
 )
@@ -86,7 +96,7 @@ function normalizePrefix(value: unknown) {
   return normalized && !normalized.endsWith('/') ? `${normalized}/` : normalized
 }
 
-function normalizeOssEndpoint(value: unknown) {
+export function normalizeOssEndpoint(value: unknown) {
   const rawEndpoint = normalizeString(value)
   if (!rawEndpoint) return ''
   const endpointWithProtocol = /^https?:\/\//i.test(rawEndpoint)
@@ -97,16 +107,25 @@ function normalizeOssEndpoint(value: unknown) {
   try {
     endpoint = new URL(endpointWithProtocol)
   } catch {
-    throw new Error('OSS_ENDPOINT must be a valid HTTPS endpoint')
+    throw new Error('OSS_ENDPOINT must be a valid HTTP or HTTPS endpoint')
   }
   if (
-    endpoint.protocol !== 'https:' ||
+    !['http:', 'https:'].includes(endpoint.protocol) ||
     endpoint.username ||
     endpoint.password ||
     endpoint.search ||
     endpoint.hash ||
     (endpoint.pathname && endpoint.pathname !== '/')
   ) {
+    throw new Error('OSS_ENDPOINT must be an HTTP or HTTPS origin without credentials, path, query, or fragment')
+  }
+  if (
+    endpoint.protocol === 'http:' &&
+    endpoint.hostname.toLowerCase().endsWith('.aliyuncs.com')
+  ) {
+    endpoint.protocol = 'https:'
+  }
+  if (endpoint.protocol !== 'https:') {
     throw new Error('OSS_ENDPOINT must be an HTTPS origin without credentials, path, query, or fragment')
   }
   return endpoint.origin
@@ -246,6 +265,12 @@ function isArchiveObjectKey(key: string) {
   return /\.tar(\.gz)?$/.test(key) && !key.endsWith('.md5')
 }
 
+function objectMatchesArch(fileName: string, arch: string) {
+  if (fileName.includes(`-${arch}.tar`)) return true
+  const otherArch = arch === 'amd64' ? 'arm64' : 'amd64'
+  return !fileName.includes(`-${otherArch}.tar`)
+}
+
 function fileNameMatchesFormats(fileName: string, formats: string[], expectedFirstValue?: string) {
   return formats.some((format) => {
     const candidates = format.endsWith('.tar') ? [format, `${format}.gz`] : [format]
@@ -266,6 +291,54 @@ function fileNameMatchesFormats(fileName: string, formats: string[], expectedFir
       return expectedFirstValue == null || matched[1] === expectedFirstValue
     })
   })
+}
+
+function releaseObjectMatches(
+  rule: PackageMarketRule,
+  root: string,
+  object: OssObject,
+  version: string,
+  arch: string,
+) {
+  const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
+  if (expectedNames.some((name) => object.name === `${root}${version}/${name}`)) {
+    return true
+  }
+
+  const prefix = `${root}${version}/`
+  if (!object.name.startsWith(prefix)) return false
+  const fileName = object.name.slice(prefix.length)
+  return Boolean(
+    fileName &&
+    !fileName.includes('/') &&
+    isArchiveObjectKey(fileName) &&
+    fileName.includes(version) &&
+    objectMatchesArch(fileName, arch),
+  )
+}
+
+function flatObjectMatches(rule: PackageMarketRule, fileName: string, version: string, arch: string) {
+  const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
+  if (expectedNames.includes(fileName)) return true
+  return Boolean(
+    fileName &&
+    !fileName.includes('/') &&
+    isArchiveObjectKey(fileName) &&
+    fileName.includes(version) &&
+    objectMatchesArch(fileName, arch),
+  )
+}
+
+function ciObjectMatches(rule: PackageMarketRule, fileName: string, hash: string, arch: string) {
+  const expectedNames = ciCandidateFileNames(rule, hash, arch)
+  if (expectedNames.includes(fileName)) return true
+  return Boolean(
+    fileName &&
+    !fileName.includes('/') &&
+    isArchiveObjectKey(fileName) &&
+    (fileName.includes(hash) || fileName.includes('latest') || fileName.includes('main')) &&
+    objectMatchesArch(fileName, arch),
+  )
 }
 
 function ruleAllowsObjectKey(rule: PackageMarketRule, objectKey: string) {
@@ -296,15 +369,20 @@ function ruleAllowsObjectKey(rule: PackageMarketRule, objectKey: string) {
 }
 
 function middlewareRootAllowsObjectKey(objectKey: string) {
-  if (!middlewareRoot || !objectKey.startsWith(middlewareRoot)) return false
-  const parts = objectKey.slice(middlewareRoot.length).split('/')
-  if (parts.length !== 2 && parts.length !== 3) return false
-  const fileName = parts.at(-1) ?? ''
-  return Boolean(
-    parts.every(Boolean) &&
-    isArchiveObjectKey(fileName) &&
-    /-[a-zA-Z0-9._-]+\.tar(?:\.gz)?$/.test(fileName),
-  )
+  for (const root of middlewareRoots) {
+    if (!objectKey.startsWith(root)) continue
+    const parts = objectKey.slice(root.length).split('/')
+    if (parts.length !== 2 && parts.length !== 3) continue
+    const fileName = parts.at(-1) ?? ''
+    if (
+      parts.every(Boolean) &&
+      isArchiveObjectKey(fileName) &&
+      /-[a-zA-Z0-9._-]+\.tar(?:\.gz)?$/.test(fileName)
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 export function isAllowedPackageMarketObjectKey(value: unknown) {
@@ -359,7 +437,7 @@ function ossClient() {
     accessKeyId,
     accessKeySecret,
     bucket,
-    secure: true,
+    secure: endpoint.startsWith('https://'),
   })
 }
 
@@ -436,9 +514,30 @@ function objectToLink(
   }
 }
 
-function ruleCategory(rule: { flatFileRoots: string[]; releaseRoots: string[] }) {
+function implicitDependencyParent(id: string, rule: {
+  dependencyRoots: string[]
+  explicitCategory: string
+  flatFileRoots: string[]
+  parent: string
+}) {
+  if (rule.parent) return rule.parent
+  if (rule.explicitCategory === 'dependency') return ''
+  if (rule.dependencyRoots.length > 0) return ''
+  if (id === 'devbox-cache') return 'devbox'
+  return ''
+}
+
+function ruleCategory(rule: {
+  dependencyRoots: string[]
+  explicitCategory: string
+  flatFileRoots: string[]
+  parent: string
+  releaseRoots: string[]
+}) {
+  if (rule.explicitCategory) return rule.explicitCategory as PackageMarketRule['category']
+  if (rule.parent || rule.dependencyRoots.length > 0) return 'dependency' as const
   const roots = [...rule.releaseRoots, ...rule.flatFileRoots]
-  if (middlewareRoot && roots.some((root) => root.startsWith(middlewareRoot))) {
+  if (roots.some((root) => middlewareRoots.some((middlewareRoot) => root.startsWith(middlewareRoot)))) {
     return 'middleware' as const
   }
   return 'apps' as const
@@ -467,14 +566,35 @@ function parseRulesFile() {
     const ciFileNameFormats = normalizeList((rule.ci_file_name_formats as unknown[]) ?? [])
     const releaseRoots = normalizeList((rule.release_roots as unknown[]) ?? [])
     const flatFileRoots = normalizeList((rule.flat_file_roots as unknown[]) ?? [])
+    const dependencyRoots = normalizeList((rule.dependency_roots as unknown[]) ?? [])
+    const dependencyFilePatterns = normalizeList((rule.dependency_file_patterns as unknown[]) ?? [])
+    const explicitCategory = normalizeString(rule.category)
+    const parent = implicitDependencyParent(id, {
+      dependencyRoots,
+      explicitCategory,
+      flatFileRoots,
+      parent: normalizeString(rule.parent),
+    })
     rules.push({
       id,
       name: normalizeString(rule.name) || id,
       releaseRoots,
       flatFileRoots,
+      dependencyRoots,
+      dependencyFilePatterns,
+      parent,
       fileNameFormats,
       ciFileNameFormats,
-      category: ruleCategory({ releaseRoots, flatFileRoots }),
+      flatFileNamePrefix: normalizeString(rule.flat_file_name_prefix),
+      flatFileNameSuffix: normalizeString(rule.flat_file_name_suffix),
+      flatFileNameSuffixes: normalizeList((rule.flat_file_name_suffixes as unknown[]) ?? []),
+      category: ruleCategory({
+        dependencyRoots,
+        explicitCategory,
+        flatFileRoots,
+        parent,
+        releaseRoots,
+      }),
       mode: flatFileRoots.length > 0 && releaseRoots.length > 0
         ? 'mixed'
         : flatFileRoots.length > 0
@@ -493,8 +613,11 @@ function publicRule(rule: PackageMarketRule): PackageMarketRule {
     ...rule,
     releaseRoots: [...rule.releaseRoots],
     flatFileRoots: [...rule.flatFileRoots],
+    dependencyRoots: [...rule.dependencyRoots],
+    dependencyFilePatterns: [...rule.dependencyFilePatterns],
     fileNameFormats: [...rule.fileNameFormats],
     ciFileNameFormats: [...rule.ciFileNameFormats],
+    flatFileNameSuffixes: [...rule.flatFileNameSuffixes],
   }
 }
 
@@ -504,24 +627,43 @@ function proMiddlewareNameFromId(packageId: string) {
 }
 
 async function publicProMiddlewareRules(client: OSS, excludedNames = new Set<string>()) {
-  if (!middlewareRoot) return []
-  const prefixes = await listCommonPrefixes(client, middlewareRoot)
-  return prefixes
-    .map((prefix) => {
-      const name = prefix.slice(middlewareRoot.length).replace(/\/$/, '')
-      return {
+  const items: PackageMarketRule[] = []
+  const seenNames = new Set<string>()
+
+  for (const root of middlewareRoots) {
+    const prefixes = await listCommonPrefixes(client, root)
+    for (const prefix of prefixes) {
+      const name = prefix.slice(root.length).replace(/\/$/, '')
+      if (!name || excludedNames.has(name) || seenNames.has(name)) continue
+      seenNames.add(name)
+      items.push({
         id: `pro:${name}`,
         name,
         category: 'middleware' as const,
         mode: 'pro-middleware' as const,
         releaseRoots: [prefix],
         flatFileRoots: [],
+        dependencyRoots: [],
+        dependencyFilePatterns: [],
         fileNameFormats: [],
         ciFileNameFormats: [],
-      }
-    })
-    .filter((item) => item.name && !excludedNames.has(item.name))
-    .sort((a, b) => a.name.localeCompare(b.name))
+        flatFileNamePrefix: '',
+        flatFileNameSuffix: '',
+        flatFileNameSuffixes: [],
+        parent: '',
+      })
+    }
+  }
+
+  return items.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+async function proMiddlewareRootForName(client: OSS, name: string) {
+  for (const root of middlewareRoots) {
+    const prefixes = await listCommonPrefixes(client, root)
+    if (prefixes.includes(`${root}${name}/`)) return `${root}${name}/`
+  }
+  return `${middlewareRoots[0] ?? defaultMiddlewareRoot}${name}/`
 }
 
 function extractProMiddlewareVersion(name: string, fileName: string) {
@@ -575,22 +717,98 @@ function ciCandidateFileNames(rule: PackageMarketRule, hash: string, arch: strin
   return candidateFileNames(formats, hash, arch)
 }
 
+function dependencyHashFromObject(root: string, objectKey: string) {
+  const rest = objectKey.slice(root.length)
+  const parts = rest.split('/')
+  return parts.length > 1 ? normalizeString(parts[0]) : ''
+}
+
+function dependencyObjectMatches(rule: PackageMarketRule, fileName: string, hash: string, arch: string) {
+  if (!fileName || fileName.includes('/')) return false
+  const expectedNames = candidateFileNames(rule.dependencyFilePatterns, hash, arch)
+  if (expectedNames.includes(fileName)) return true
+  if (fileName.endsWith('.xlsx')) return true
+  if (fileName.endsWith(`.${arch}.txt`)) return true
+  return isArchiveObjectKey(fileName) && fileName.includes(hash) && objectMatchesArch(fileName, arch)
+}
+
+async function listDependencyVersions(client: OSS, rule: PackageMarketRule, arch: string) {
+  const versions = new Map<string, { hash: string; object: OssObject }>()
+  for (const root of rule.dependencyRoots) {
+    const objects = await listAllObjects(client, root)
+    for (const object of objects) {
+      const hash = dependencyHashFromObject(root, object.name)
+      if (!hash) continue
+      const fileName = object.name.slice(`${root}${hash}/`.length)
+      if (!dependencyObjectMatches(rule, fileName, hash, arch)) continue
+      const current = versions.get(hash)
+      if (!current || objectTime(object) > objectTime(current.object)) {
+        versions.set(hash, { hash, object })
+      }
+    }
+  }
+
+  return [...versions.values()]
+    .sort((a, b) => objectTime(b.object) - objectTime(a.object))
+    .map((item) => ({
+      hash: item.hash,
+      label: formatCiLabel({ hash: item.hash, lastModified: item.object.lastModified }),
+      lastModified: item.object.lastModified,
+    }))
+}
+
+async function buildDependencyPackage(
+  client: OSS,
+  rule: PackageMarketRule,
+  arch: string,
+  requestedHash: string,
+  expireSeconds = downloadExpireSeconds,
+): Promise<PackageMarketDetail> {
+  const versions = await listDependencyVersions(client, rule, arch)
+  const hash = normalizeString(requestedHash) || versions[0]?.hash || ''
+  const matched: OssObject[] = []
+  if (hash) {
+    for (const root of rule.dependencyRoots) {
+      const objects = await listAllObjects(client, `${root}${hash}/`)
+      for (const object of objects) {
+        const fileName = object.name.slice(`${root}${hash}/`.length)
+        if (dependencyObjectMatches(rule, fileName, hash, arch)) {
+          matched.push(object)
+        }
+      }
+    }
+  }
+  const selected = versions.find((item) => item.hash === hash)
+
+  return {
+    title: rule.name,
+    type: 'dependency package',
+    meta: [
+      { label: '规则 key', value: rule.id },
+      { label: '依赖版本', value: selected?.label || '未找到' },
+      { label: '下载有效期', value: `${Math.round(expireSeconds / 60)} 分钟` },
+    ],
+    ciVersions: versions,
+    selectedHash: hash,
+    links: matched.map((object) => objectToLink(client, rule.name, selected?.label || hash, object, expireSeconds)),
+  }
+}
+
 function flatSuffixes(
-  rule: PackageMarketRule & { flatFileNameSuffix?: string; flatFileNameSuffixes?: string[] },
+  rule: PackageMarketRule,
   arch: string,
 ) {
-  return normalizeList([
+  const suffixes = normalizeList([
     rule.flatFileNameSuffix,
-    ...((rule.flatFileNameSuffixes as unknown[]) ?? []),
+    ...rule.flatFileNameSuffixes,
   ]).map((suffix) => formatFileName(suffix, arch, arch))
+  return normalizeList(suffixes.flatMap((suffix) => (
+    suffix.endsWith('.tar') ? [suffix, `${suffix}.gz`] : [suffix]
+  )))
 }
 
 function extractFlatVersion(
-  rule: PackageMarketRule & {
-    flatFileNamePrefix?: string
-    flatFileNameSuffix?: string
-    flatFileNameSuffixes?: string[]
-  },
+  rule: PackageMarketRule,
   fileName: string,
   arch: string,
 ) {
@@ -611,8 +829,7 @@ function newestVersion(objects: Array<{ version: string }>) {
 }
 
 async function listProMiddlewareReleaseVersions(client: OSS, name: string, arch: string) {
-  if (!middlewareRoot) return []
-  const root = `${middlewareRoot}${name}/`
+  const root = await proMiddlewareRootForName(client, name)
   const objects = await listAllObjects(client, root)
   const versions = new Map<string, { object: OssObject; version: string }>()
 
@@ -644,10 +861,9 @@ async function buildProMiddlewarePackage(
   requestedVersion: string,
   expireSeconds = downloadExpireSeconds,
 ): Promise<PackageMarketDetail> {
-  if (!middlewareRoot) throw new Error('PACKAGE_MARKET_MIDDLEWARE_ROOT must be set')
   const versions = await listProMiddlewareReleaseVersions(client, name, arch)
   const version = normalizeString(requestedVersion) || versions[0]?.version || ''
-  const root = `${middlewareRoot}${name}/`
+  const root = await proMiddlewareRootForName(client, name)
   const objects = await listAllObjects(client, root)
   const matched = objects.filter((object) => {
     const fileName = object.name.slice(root.length)
@@ -674,8 +890,7 @@ async function buildProMiddlewarePackage(
 }
 
 async function listProMiddlewareCiVersions(client: OSS, name: string, arch: string) {
-  if (!middlewareRoot) return []
-  const root = `${middlewareRoot}${name}/`
+  const root = await proMiddlewareRootForName(client, name)
   const objects = await listAllObjects(client, root)
   const versions = new Map<string, { hash: string; object: OssObject }>()
 
@@ -708,10 +923,9 @@ async function buildProMiddlewareCiPackage(
   requestedHash: string,
   expireSeconds = downloadExpireSeconds,
 ): Promise<PackageMarketDetail> {
-  if (!middlewareRoot) throw new Error('PACKAGE_MARKET_MIDDLEWARE_ROOT must be set')
   const versions = await listProMiddlewareCiVersions(client, name, arch)
   const hash = normalizeString(requestedHash) || versions[0]?.hash || ''
-  const root = `${middlewareRoot}${name}/`
+  const root = await proMiddlewareRootForName(client, name)
   const objects = hash ? await listAllObjects(client, `${root}${hash}/`) : []
   const matched = objects.filter((object) => {
     const fileName = object.name.slice(`${root}${hash}/`.length)
@@ -827,11 +1041,7 @@ async function buildBasePackage(
 
 async function listReleaseVersions(
   client: OSS,
-  rule: PackageMarketRule & {
-    flatFileNamePrefix?: string
-    flatFileNameSuffix?: string
-    flatFileNameSuffixes?: string[]
-  },
+  rule: PackageMarketRule,
   arch: string,
 ) {
   const versions = new Map<string, { object: OssObject; version: string }>()
@@ -841,8 +1051,7 @@ async function listReleaseVersions(
     for (const object of objects) {
       const version = releaseVersionFromObject(root, object.name)
       if (!version) continue
-      const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
-      if (!expectedNames.some((name) => object.name === `${root}${version}/${name}`)) continue
+      if (!releaseObjectMatches(rule, root, object, version, arch)) continue
       const current = versions.get(version)
       if (!current || objectTime(object) > objectTime(current.object)) {
         versions.set(version, { version, object })
@@ -857,8 +1066,7 @@ async function listReleaseVersions(
       if (!fileName || fileName.includes('/')) continue
       const version = extractFlatVersion(rule, fileName, arch)
       if (!version) continue
-      const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
-      if (!expectedNames.includes(fileName)) continue
+      if (!flatObjectMatches(rule, fileName, version, arch)) continue
       const current = versions.get(version)
       if (!current || objectTime(object) > objectTime(current.object)) {
         versions.set(version, { version, object })
@@ -883,9 +1091,8 @@ async function listCiVersions(client: OSS, rule: PackageMarketRule, arch: string
     for (const object of objects) {
       const hash = ciHashFromObject(root, object.name)
       if (!hash) continue
-      const expectedNames = ciCandidateFileNames(rule, hash, arch)
       const fileName = object.name.slice(`${root}${hash}/`.length)
-      if (!expectedNames.includes(fileName)) continue
+      if (!ciObjectMatches(rule, fileName, hash, arch)) continue
       const current = versions.get(hash)
       if (!current || objectTime(object) > objectTime(current.object)) {
         versions.set(hash, { hash, object })
@@ -916,10 +1123,9 @@ async function buildCiPackage(
   if (hash) {
     for (const root of ciRootsForRule(rule)) {
       const objects = await listAllObjects(client, `${root}${hash}/`)
-      const expectedNames = ciCandidateFileNames(rule, hash, arch)
       for (const object of objects) {
         const fileName = object.name.slice(`${root}${hash}/`.length)
-        if (expectedNames.includes(fileName)) {
+        if (ciObjectMatches(rule, fileName, hash, arch)) {
           matched.push(object)
         }
       }
@@ -942,11 +1148,7 @@ async function buildCiPackage(
 
 async function buildComboPackage(
   client: OSS,
-  rule: PackageMarketRule & {
-    flatFileNamePrefix?: string
-    flatFileNameSuffix?: string
-    flatFileNameSuffixes?: string[]
-  },
+  rule: PackageMarketRule,
   arch: string,
   releaseVersion: string,
   channel: 'release' | 'ci',
@@ -954,6 +1156,9 @@ async function buildComboPackage(
   expireSeconds = downloadExpireSeconds,
 ): Promise<PackageMarketDetail> {
   if (channel === 'ci') {
+    if (rule.category === 'dependency' && rule.dependencyRoots.length > 0) {
+      return buildDependencyPackage(client, rule, arch, ciVersion, expireSeconds)
+    }
     return buildCiPackage(client, rule, arch, ciVersion, expireSeconds)
   }
 
@@ -963,8 +1168,7 @@ async function buildComboPackage(
     for (const object of objects) {
       const version = releaseVersionFromObject(root, object.name)
       if (!version) continue
-      const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
-      if (expectedNames.some((name) => object.name === `${root}${version}/${name}`)) {
+      if (releaseObjectMatches(rule, root, object, version, arch)) {
         matched.push({ version, object })
       }
     }
@@ -977,8 +1181,7 @@ async function buildComboPackage(
       if (!fileName || fileName.includes('/')) continue
       const version = extractFlatVersion(rule, fileName, arch)
       if (!version) continue
-      const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
-      if (expectedNames.includes(fileName)) {
+      if (flatObjectMatches(rule, fileName, version, arch)) {
         matched.push({ version, object })
       }
     }
@@ -1094,6 +1297,9 @@ export async function listPackageMarketReleaseVersions(params: {
   if (!rule) {
     throw new Error(`unknown package: ${params.packageId}`)
   }
+  if (rule.category === 'dependency' && rule.dependencyRoots.length > 0) {
+    return []
+  }
   return listReleaseVersions(client, rule, arch)
 }
 
@@ -1111,6 +1317,9 @@ export async function listPackageMarketCiVersions(params: {
   const rule = parseRulesFile().find((item) => item.id === params.packageId)
   if (!rule) {
     throw new Error(`unknown package: ${params.packageId}`)
+  }
+  if (rule.category === 'dependency' && rule.dependencyRoots.length > 0) {
+    return listDependencyVersions(client, rule, arch)
   }
   return listCiVersions(client, rule, arch)
 }

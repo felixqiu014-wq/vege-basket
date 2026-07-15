@@ -86,25 +86,25 @@ spec:
       default: ''
       required: false
     OSS_ENDPOINT:
-      description: Optional Alibaba OSS endpoint for package timeline features.
+      description: Alibaba OSS endpoint required for todo image uploads and package timeline features.
       type: string
       default: ''
-      required: false
+      required: true
     OSS_ACCESS_KEY_ID:
-      description: Optional Alibaba OSS access key id.
+      description: Alibaba OSS access key id required for todo image uploads and package timeline features.
       type: string
       default: ''
-      required: false
+      required: true
     OSS_ACCESS_KEY_SECRET:
-      description: Optional Alibaba OSS access key secret.
+      description: Alibaba OSS access key secret required for todo image uploads and package timeline features.
       type: string
       default: ''
-      required: false
+      required: true
     OSS_BUCKET:
-      description: Optional Alibaba OSS bucket name.
+      description: Alibaba OSS bucket name required for todo image uploads and package timeline features.
       type: string
       default: ''
-      required: false
+      required: true
     PACKAGE_MARKET_MIDDLEWARE_ROOT:
       description: Optional OSS middleware root for package market browsing.
       type: string
@@ -267,7 +267,7 @@ metadata:
     app: ${{ defaults.app_name }}
     cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
   annotations:
-    originImageName: ghcr.io/felixqiu014-wq/vege-basket:20260630-120900
+    originImageName: ghcr.io/felixqiu014-wq/vege-basket:20260715-121459
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
 spec:
@@ -325,7 +325,7 @@ spec:
               memory: 256Mi
       containers:
         - name: ${{ defaults.app_name }}
-          image: ghcr.io/felixqiu014-wq/vege-basket:20260630-120900
+          image: ghcr.io/felixqiu014-wq/vege-basket:20260715-121459
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8787

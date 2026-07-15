@@ -56,12 +56,14 @@ Use current, non-database checks first:
 ```bash
 npm run build
 npm run lint
+npm test
 git diff --check
 ```
 
-For scoped work, run ESLint against the touched TypeScript files. There is currently no
-automated test suite; do not claim database, OSS, Feishu, browser, or deployment behavior
-is verified unless that surface was exercised in an authorized environment.
+For scoped work, run ESLint against the touched TypeScript files. The focused Node test
+suite currently covers notification policy and OSS endpoint normalization; do not claim
+database, OSS, Feishu, browser, or deployment behavior is verified unless that surface
+was exercised in an authorized environment.
 
 ## Deployment
 

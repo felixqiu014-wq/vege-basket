@@ -18,6 +18,7 @@ These commands do not connect to or mutate PostgreSQL:
 npm ci
 npm run build
 npm run lint
+npm test
 git diff --check
 ```
 

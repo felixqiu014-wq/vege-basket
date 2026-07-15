@@ -16,6 +16,7 @@ import {
   encryptText,
 } from './crypto.ts'
 import { pool, query } from './db.ts'
+import { shouldRetirePackageEventNotification } from './notification-policy.ts'
 import {
   createPackageItemDownloadLink,
   getOssObject,
@@ -2156,6 +2157,7 @@ async function getWorkspace(userId: number) {
       priority: Priority
       done: boolean
       confirmation_status: TodoConfirmationStatus
+      linked_to_delivery_event: boolean
       project_module_id: string | null
       module_name: string | null
       created_by_user_id: string | null
@@ -2178,6 +2180,16 @@ async function getWorkspace(userId: number) {
              t.priority,
              t.done,
              t.confirmation_status,
+             exists (
+               select 1
+               from project_package_operation_todos operation_todo
+               join project_package_operations operation
+                 on operation.id = operation_todo.project_package_operation_id
+               join project_package_events event
+                 on event.id = operation.project_package_event_id
+               where operation_todo.todo_id = t.id
+                 and event.project_id = t.project_id
+             ) as linked_to_delivery_event,
              t.project_module_id,
              module.name as module_name,
              t.created_by_user_id,
@@ -2455,6 +2467,7 @@ async function getWorkspace(userId: number) {
       priority: todo.priority,
       done: todo.done,
       confirmationStatus: todo.confirmation_status,
+      linkedToDeliveryEvent: todo.linked_to_delivery_event,
       moduleId: todo.project_module_id ? Number(todo.project_module_id) : undefined,
       moduleName: todo.module_name ?? undefined,
       notes: todoNotesByTodo.get(Number(todo.id)) ?? [],
@@ -2879,6 +2892,15 @@ async function getNotifications(userId: number) {
        and pm.invited_user_id = $1
       left join users assigner on assigner.id = e.assigned_by_user_id
       where e.assignee_user_id = $1
+        and e.status = 'draft'
+        and not exists (
+          select 1
+          from notification_deliveries delivery
+          where delivery.kind = 'package_event_assigned'
+            and delivery.source_id = e.id
+            and delivery.channel = 'in_app'
+            and delivery.status = 'retired'
+        )
         and (p.user_id = $1 or pm.id is not null)
       order by e.status asc, e.assigned_at desc nulls last, e.id desc
       `,
@@ -2927,6 +2949,7 @@ async function getNotifications(userId: number) {
       left join users assigner on assigner.id = t.assigned_by_user_id
       left join users assignee on assignee.id = t.assignee_user_id
       where t.assignee_user_id = $1
+        and t.done = false
         and t.confirmation_status = 'confirmed'
         and (p.user_id = $1 or pm.id is not null)
       order by t.done asc, t.due_date asc, t.id desc
@@ -3000,6 +3023,7 @@ async function getNotifications(userId: number) {
       left join project_modules module on module.id = t.project_module_id
       left join users author on author.id = n.author_user_id
       where m.mentioned_user_id = $1
+        and t.done = false
       order by m.created_at desc, m.id desc
       `,
       [userId],
@@ -5694,17 +5718,25 @@ app.patch('/api/projects/:projectId/package-timeline/events/:eventId', asyncHand
     response.status(404).json({ error: 'Project not found' })
     return
   }
-  const previousAssignee = await query<{ assignee_user_id: string | null }>(
+  const previousEvent = await query<{
+    assignee_user_id: string | null
+    status: ProjectPackageEventStatus
+  }>(
     `
-    select assignee_user_id
+    select assignee_user_id, status
     from project_package_events
     where id = $1 and project_id = $2
     `,
     [Number(request.params.eventId), projectId],
   )
-  const previousAssigneeUserId = previousAssignee.rows[0]?.assignee_user_id
-    ? Number(previousAssignee.rows[0].assignee_user_id)
+  const previousAssigneeUserId = previousEvent.rows[0]?.assignee_user_id
+    ? Number(previousEvent.rows[0].assignee_user_id)
     : null
+  const previousStatus = previousEvent.rows[0]?.status
+  if (!previousStatus) {
+    response.status(404).json({ error: 'Package event not found' })
+    return
+  }
   let nextAssigneeUserId: number | null | undefined
   if ('assigneeUserId' in request.body) {
     nextAssigneeUserId = await ensureProjectMemberUserId(
@@ -5717,20 +5749,56 @@ app.patch('/api/projects/:projectId/package-timeline/events/:eventId', asyncHand
       return
     }
   }
-  await updateProjectPackageEvent({
-    projectId,
-    eventId: Number(request.params.eventId),
-    ...('assigneeUserId' in request.body
-      ? {
-          assigneeUserId: nextAssigneeUserId,
-          assignedByUserId: userId,
-        }
-      : {}),
-    deliveryDate: 'deliveryDate' in request.body ? String(request.body.deliveryDate ?? '') : undefined,
-    status: 'status' in request.body ? ensureProjectPackageEventStatus(request.body.status) : undefined,
-    title: 'title' in request.body ? String(request.body.title ?? '') : undefined,
-    type: 'type' in request.body ? ensureProjectPackageEventType(request.body.type) : undefined,
-  })
+  const nextStatus = 'status' in request.body
+    ? ensureProjectPackageEventStatus(request.body.status)
+    : undefined
+  const eventId = Number(request.params.eventId)
+  const client = await pool.connect()
+  try {
+    await client.query('begin')
+    await updateProjectPackageEvent({
+      client,
+      projectId,
+      eventId,
+      ...('assigneeUserId' in request.body
+        ? {
+            assigneeUserId: nextAssigneeUserId,
+            assignedByUserId: userId,
+          }
+        : {}),
+      deliveryDate: 'deliveryDate' in request.body ? String(request.body.deliveryDate ?? '') : undefined,
+      status: nextStatus,
+      title: 'title' in request.body ? String(request.body.title ?? '') : undefined,
+      type: 'type' in request.body ? ensureProjectPackageEventType(request.body.type) : undefined,
+    })
+    if (shouldRetirePackageEventNotification(previousStatus, nextStatus)) {
+      await client.query(
+        `
+        insert into notification_deliveries (
+          user_id,
+          kind,
+          source_id,
+          channel,
+          target_type,
+          target_id,
+          status,
+          updated_at
+        )
+        values ($1, 'package_event_assigned', $2, 'in_app', 'event', $3, 'retired', now())
+        on conflict (kind, source_id, channel, target_type, target_id) do update
+          set status = 'retired',
+              updated_at = now()
+        `,
+        [userId, eventId, String(eventId)],
+      )
+    }
+    await client.query('commit')
+  } catch (error) {
+    await client.query('rollback')
+    throw error
+  } finally {
+    client.release()
+  }
   if (nextAssigneeUserId && nextAssigneeUserId !== previousAssigneeUserId) {
     await query(
       `
@@ -5739,9 +5807,9 @@ app.patch('/api/projects/:projectId/package-timeline/events/:eventId', asyncHand
         and source_id = $1
         and channel = 'feishu'
       `,
-      [Number(request.params.eventId)],
+      [eventId],
     )
-    enqueueLatestAssignedPackageEventDelivery(Number(request.params.eventId))
+    enqueueLatestAssignedPackageEventDelivery(eventId)
   }
   response.json(await getProjectPackageTimeline(projectId))
 }))

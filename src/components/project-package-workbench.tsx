@@ -215,6 +215,16 @@ type PackageMarketDetailContext = {
   releaseVersion: string
 }
 
+type PackageMarketDependencyState = {
+  context: PackageMarketDetailContext | null
+  detail: PackageMarketDetail | null
+  error: string
+  loading: boolean
+  rule: PackageMarketRule
+  selectedVersion: string
+  versions: PackageMarketVersion[]
+}
+
 function eventTypeLabel(type: ProjectPackageEventType) {
   return type === 'init' ? '初始化安装' : '升级'
 }
@@ -519,6 +529,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [marketCiVersions, setMarketCiVersions] = useState<PackageMarketVersion[]>([])
   const [marketDetail, setMarketDetail] = useState<PackageMarketDetail | null>(null)
   const [marketDetailContext, setMarketDetailContext] = useState<PackageMarketDetailContext | null>(null)
+  const [marketDependencyDetails, setMarketDependencyDetails] = useState<PackageMarketDependencyState[]>([])
   const [marketLoading, setMarketLoading] = useState(false)
   const [marketError, setMarketError] = useState('')
   const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<'base' | 'apps' | 'middleware', boolean>>({
@@ -707,6 +718,10 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     const middleware = filteredRules.filter((rule) => rule.category === 'middleware')
     return { apps, base, middleware }
   }, [filteredRules])
+  const selectedMarketDependencyRules = useMemo(
+    () => marketRules.filter((rule) => rule.category === 'dependency' && rule.parent === marketSelectedPackage),
+    [marketRules, marketSelectedPackage],
+  )
 
   async function copyToClipboard(value: string, feedbackKey: string) {
     if (!value) return
@@ -719,6 +734,29 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
 
   function copiedLabel(feedbackKey: string, fallback: string) {
     return copiedValue === feedbackKey ? '已复制' : fallback
+  }
+
+  function addMarketLinkToCart(
+    context: PackageMarketDetailContext | null,
+    detail: PackageMarketDetail,
+    link: PackageMarketDetail['links'][number],
+  ) {
+    if (!context) return
+    setCartItems((current) => [
+      ...current,
+      {
+        sourcePackageId: context.packageId,
+        sourcePackageName: detail.title,
+        packageName: link.name,
+        channel: context.channel,
+        channelLabel: channelLabel(context.channel),
+        arch: context.arch,
+        version: link.version,
+        objectKey: link.objectKey,
+        objectLastModified: link.lastModified,
+        sizeBytes: link.size,
+      },
+    ])
   }
 
   useEffect(() => {
@@ -763,7 +801,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
         ? rulesPayload.expireMinutes
         : packageMarketExpireOptions[0].value
       setMarketExpireMinutes(expireMinutes)
-      return expireMinutes
+      return { expireMinutes, rules: rulesPayload.rules }
     } catch (error) {
       if (requestId !== marketDetailRequestIdRef.current) return null
       setMarketError(error instanceof Error ? error.message : '包市场读取失败')
@@ -771,13 +809,90 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     }
   }
 
+  async function refreshMarketDependencyDetails(params: {
+    arch: 'amd64' | 'arm64'
+    expireMinutes: number
+    requestId: number
+    rules: PackageMarketRule[]
+    selectedVersions?: Record<string, string>
+  }) {
+    const { arch, expireMinutes, requestId, rules, selectedVersions = {} } = params
+    if (rules.length === 0) {
+      setMarketDependencyDetails([])
+      return
+    }
+
+    setMarketDependencyDetails(rules.map((rule) => ({
+      context: null,
+      detail: null,
+      error: '',
+      loading: true,
+      rule,
+      selectedVersion: selectedVersions[rule.id] ?? '',
+      versions: [],
+    })))
+
+    const nextDetails = await Promise.all(rules.map(async (rule): Promise<PackageMarketDependencyState> => {
+      const dependencyChannel: PackageMarketChannel = rule.dependencyRoots?.length ? 'ci' : 'release'
+      try {
+        const versions = await onLoadPackageMarketVersions({
+          arch,
+          kind: dependencyChannel,
+          packageId: rule.id,
+        })
+        const selectedVersion =
+          selectedVersions[rule.id] ||
+          (dependencyChannel === 'ci' ? versions[0]?.hash : versions[0]?.version) ||
+          ''
+        const detail = await onLoadPackageMarketDetail({
+          packageId: rule.id,
+          channel: dependencyChannel,
+          arch,
+          expireMinutes,
+          ciVersion: dependencyChannel === 'ci' ? selectedVersion : '',
+          releaseVersion: dependencyChannel === 'release' ? selectedVersion : '',
+        })
+        return {
+          context: {
+            arch,
+            channel: dependencyChannel,
+            ciVersion: dependencyChannel === 'ci' ? selectedVersion : '',
+            packageId: rule.id,
+            releaseVersion: dependencyChannel === 'release' ? selectedVersion : '',
+          },
+          detail,
+          error: '',
+          loading: false,
+          rule,
+          selectedVersion,
+          versions,
+        }
+      } catch (error) {
+        return {
+          context: null,
+          detail: null,
+          error: error instanceof Error ? error.message : '附属包详情加载失败',
+          loading: false,
+          rule,
+          selectedVersion: selectedVersions[rule.id] ?? '',
+          versions: [],
+        }
+      }
+    }))
+
+    if (requestId !== marketDetailRequestIdRef.current) return
+    setMarketDependencyDetails(nextDetails)
+  }
+
   async function refreshMarketDetail(nextOverrides?: Partial<{
     arch: 'amd64' | 'arm64'
     channel: PackageMarketChannel
     ciVersion: string
     expireMinutes: number
+    marketRules: PackageMarketRule[]
     packageId: string
     releaseVersion: string
+    dependencyVersions: Record<string, string>
   }>) {
     const packageId = nextOverrides?.packageId ?? marketSelectedPackage
     const channel = nextOverrides?.channel ?? marketChannel
@@ -785,6 +900,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     const releaseVersion = nextOverrides?.releaseVersion ?? marketReleaseVersion
     const ciVersion = nextOverrides?.ciVersion ?? marketCiVersion
     const expireMinutes = nextOverrides?.expireMinutes ?? marketExpireMinutes
+    const rules = nextOverrides?.marketRules ?? marketRules
     const requestId = ++marketDetailRequestIdRef.current
     const context: PackageMarketDetailContext = {
       arch,
@@ -797,6 +913,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     setMarketError('')
     setMarketDetail(null)
     setMarketDetailContext(null)
+    setMarketDependencyDetails([])
     try {
       const [versions, detail] = await Promise.all([
         channel === 'ci'
@@ -830,6 +947,15 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       }
       setMarketDetail(detail)
       setMarketDetailContext(context)
+      const dependencyRules =
+        rules.filter((rule) => rule.category === 'dependency' && rule.parent === packageId)
+      void refreshMarketDependencyDetails({
+        arch,
+        expireMinutes,
+        requestId,
+        rules: dependencyRules,
+        selectedVersions: nextOverrides?.dependencyVersions,
+      })
     } catch (error) {
       if (requestId !== marketDetailRequestIdRef.current) return
       setMarketError(error instanceof Error ? error.message : '包详情加载失败')
@@ -862,13 +988,16 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     setMarketLoading(true)
     setMarketError('')
     setMarketOpen(true)
-    void loadMarketContext(openRequestId).then((expireMinutes) => {
+    void loadMarketContext(openRequestId).then((context) => {
       if (openRequestId !== marketDetailRequestIdRef.current) return
-      if (expireMinutes == null) {
+      if (context == null) {
         setMarketLoading(false)
         return
       }
-      void refreshMarketDetail({ expireMinutes })
+      void refreshMarketDetail({
+        expireMinutes: context.expireMinutes,
+        marketRules: context.rules,
+      })
     })
   }
 
@@ -1092,6 +1221,63 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     } finally {
       setBusyAction('')
     }
+  }
+
+  function renderMarketLinkCard(
+    detail: PackageMarketDetail,
+    context: PackageMarketDetailContext | null,
+    link: PackageMarketDetail['links'][number],
+  ) {
+    return (
+      <article className="package-market-link-card" key={`${context?.packageId ?? detail.title}-${link.objectKey}-${link.version}`}>
+        <div className="package-market-link-head">
+          <div>
+            <strong>{link.name}</strong>
+            <small>{` · ${link.version}${link.size ? ` · ${formatBytes(link.size)}` : ''}`}</small>
+          </div>
+          <div className="package-market-link-actions">
+            <Button
+              className="ghost-button"
+              variant="outline"
+              type="button"
+              onClick={() =>
+                void copyToClipboard(
+                  link.downloadUrl,
+                  `copy-download-url-${link.objectKey}`,
+                )
+              }
+            >
+              <Copy size={15} /> {copiedLabel(`copy-download-url-${link.objectKey}`, '复制下载链接')}
+            </Button>
+            <Button
+              className="ghost-button"
+              variant="outline"
+              type="button"
+              disabled={!context}
+              onClick={() => addMarketLinkToCart(context, detail, link)}
+            >
+              <Package size={16} /> 添加
+            </Button>
+          </div>
+        </div>
+        <code>{link.objectKey}</code>
+        <div className="package-market-link-footer">
+          <a href={link.downloadUrl} target="_blank" rel="noreferrer">
+            查看临时链接
+          </a>
+          <Button
+            className="ghost-button"
+            variant="outline"
+            type="button"
+            onClick={() =>
+              void copyToClipboard(link.objectKey, `copy-object-key-${link.objectKey}`)
+            }
+          >
+            <Copy size={15} /> {copiedLabel(`copy-object-key-${link.objectKey}`, '复制 Key')}
+          </Button>
+        </div>
+      </article>
+    )
   }
 
   useImperativeHandle(ref, () => ({
@@ -2085,74 +2271,71 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                     {marketDetail.links.length === 0 ? (
                       <p className="empty-state">当前参数下没有找到可用对象。</p>
                     ) : (
-                      marketDetail.links.map((link) => (
-                        <article className="package-market-link-card" key={`${link.objectKey}-${link.version}`}>
-                          <div className="package-market-link-head">
-                            <div>
-                              <strong>{link.name}</strong>
-                              <small>{` · ${link.version}${link.size ? ` · ${formatBytes(link.size)}` : ''}`}</small>
-                            </div>
-                            <div className="package-market-link-actions">
-                              <Button
-                                className="ghost-button"
-                                variant="outline"
-                                type="button"
-                                onClick={() =>
-                                  void copyToClipboard(
-                                    link.downloadUrl,
-                                    `copy-download-url-${link.objectKey}`,
-                                  )
-                                }
-                              >
-                                <Copy size={15} /> {copiedLabel(`copy-download-url-${link.objectKey}`, '复制下载链接')}
-                              </Button>
-                              <Button
-                                className="ghost-button"
-                                variant="outline"
-                                type="button"
-                                disabled={!marketDetailContext}
-                                onClick={() => {
-                                  if (!marketDetailContext) return
-                                  setCartItems((current) => [
-                                    ...current,
-                                    {
-                                      sourcePackageId: marketDetailContext.packageId,
-                                      sourcePackageName: marketDetail.title,
-                                      packageName: link.name,
-                                      channel: marketDetailContext.channel,
-                                      channelLabel: channelLabel(marketDetailContext.channel),
-                                      arch: marketDetailContext.arch,
-                                      version: link.version,
-                                      objectKey: link.objectKey,
-                                      objectLastModified: link.lastModified,
-                                      sizeBytes: link.size,
-                                    },
-                                  ])
-                                }}
-                              >
-                                <Package size={16} /> 添加
-                              </Button>
-                            </div>
-                          </div>
-                          <code>{link.objectKey}</code>
-                          <div className="package-market-link-footer">
-                            <a href={link.downloadUrl} target="_blank" rel="noreferrer">
-                              查看临时链接
-                            </a>
-                            <Button
-                              className="ghost-button"
-                              variant="outline"
-                              type="button"
-                              onClick={() =>
-                                void copyToClipboard(link.objectKey, `copy-object-key-${link.objectKey}`)
-                              }
-                            >
-                              <Copy size={15} /> {copiedLabel(`copy-object-key-${link.objectKey}`, '复制 Key')}
-                            </Button>
-                          </div>
-                        </article>
-                      ))
+                      marketDetail.links.map((link) => renderMarketLinkCard(marketDetail, marketDetailContext, link))
                     )}
+                    {selectedMarketDependencyRules.length > 0 ? (
+                      marketDependencyDetails.map((dependency) => (
+                        <section className="package-market-dependency" key={dependency.rule.id}>
+                          <div className="package-market-dependency-head">
+                            <div>
+                              <strong>{dependency.rule.name}</strong>
+                              <small>附属包 · {dependency.rule.id}</small>
+                            </div>
+                            {dependency.versions.length > 0 ? (
+                              <Label className="package-market-dependency-version">
+                                版本
+                                <Select
+                                  value={dependency.selectedVersion}
+                                  onValueChange={(value) => {
+                                    const selectedVersions = Object.fromEntries(
+                                      marketDependencyDetails.map((item) => [item.rule.id, item.selectedVersion]),
+                                    )
+                                    selectedVersions[dependency.rule.id] = value
+                                    void refreshMarketDependencyDetails({
+                                      arch: marketArch,
+                                      expireMinutes: marketExpireMinutes,
+                                      requestId: marketDetailRequestIdRef.current,
+                                      rules: selectedMarketDependencyRules,
+                                      selectedVersions,
+                                    })
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="选择版本" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {dependency.versions.map((version) => (
+                                      <SelectItem
+                                        key={version.hash ?? version.version ?? version.label}
+                                        value={version.hash ?? version.version ?? version.label}
+                                      >
+                                        {version.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </Label>
+                            ) : null}
+                          </div>
+                          {dependency.error ? <p className="form-error">{dependency.error}</p> : null}
+                          {dependency.loading ? (
+                            <p className="empty-state">正在读取附属包...</p>
+                          ) : dependency.detail ? (
+                            dependency.detail.links.length === 0 ? (
+                              <p className="empty-state">当前参数下没有找到可用附属包对象。</p>
+                            ) : (
+                              <div className="package-market-link-list">
+                                {dependency.detail.links.map((link) =>
+                                  renderMarketLinkCard(dependency.detail as PackageMarketDetail, dependency.context, link),
+                                )}
+                              </div>
+                            )
+                          ) : (
+                            <p className="empty-state">当前包没有可用附属包对象。</p>
+                          )}
+                        </section>
+                      ))
+                    ) : null}
                   </div>
                 ) : (
                   <p className="empty-state">选择一个包后查看详情。</p>

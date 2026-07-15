@@ -8,6 +8,7 @@
     "dev:api": "tsx watch server/index.ts",
     "db:init": "tsx server/init-db.ts",
     "db:encrypt-existing": "tsx server/encrypt-existing.ts",
+    "test": "node --import tsx --test server/*.test.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

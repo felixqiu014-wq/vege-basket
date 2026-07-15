@@ -1237,6 +1237,7 @@ export async function createProjectPackageEvent(params: {
 export async function updateProjectPackageEvent(params: {
   assignedByUserId?: number
   assigneeUserId?: number | null
+  client?: PoolClient
   eventId: number
   deliveryDate?: string
   projectId: number
@@ -1278,7 +1279,7 @@ export async function updateProjectPackageEvent(params: {
     throw new Error('No supported fields to update')
   }
   values.push(params.eventId, params.projectId)
-  await query(
+  await (params.client ?? pool).query(
     `
     update project_package_events
     set ${updates.join(', ')}, updated_at = now()
