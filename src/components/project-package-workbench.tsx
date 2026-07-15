@@ -1,13 +1,21 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import {
+  Component,
+  forwardRef,
+  lazy,
+  Suspense,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import {
   CaretDown,
   CaretRight,
-  Code,
-  CodeBlock,
   Copy,
   DotsThree,
   FunnelSimple,
-  Highlighter,
   Package,
   Plus,
   ShoppingCartSimple,
@@ -154,6 +162,34 @@ type PackageWorkbenchProps = {
   project: Project
   todos: Todo[]
   timeline: ProjectPackageTimeline | null
+}
+
+const MarkdownWysiwygEditor = lazy(() =>
+  import('@/components/markdown-wysiwyg-editor').then((module) => ({
+    default: module.MarkdownWysiwygEditor,
+  })),
+)
+
+class MarkdownEditorLoadBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="markdown-wysiwyg-loading is-error" role="alert">
+          <strong>编辑器加载失败</strong>
+          <Button type="button" variant="outline" onClick={() => window.location.reload()}>
+            刷新页面
+          </Button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 export type ProjectPackageWorkbenchHandle = {
@@ -414,336 +450,6 @@ function DeleteConfirmDialog({
   )
 }
 
-function escapeHtml(value: string) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => {
-    const entities: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;',
-    }
-    return entities[char] ?? char
-  })
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value).replace(/`/g, '&#096;')
-}
-
-function escapeMarkdownInline(value: string) {
-  return escapeHtml(value)
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/==(.+?)==/g, '<mark>$1</mark>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-}
-
-function renderInlineLines(lines: string[]) {
-  return lines.map((line) => escapeMarkdownInline(line)).join('<br />')
-}
-
-function splitMarkdownTableRow(row: string) {
-  const trimmed = row.trim()
-  const normalized = trimmed.replace(/^\|/, '').replace(/\|$/, '')
-  const cells: string[] = []
-  let current = ''
-  let escaping = false
-
-  for (const char of normalized) {
-    if (escaping) {
-      current += char
-      escaping = false
-      continue
-    }
-    if (char === '\\') {
-      escaping = true
-      continue
-    }
-    if (char === '|') {
-      cells.push(current.trim())
-      current = ''
-      continue
-    }
-    current += char
-  }
-
-  cells.push(current.trim())
-  return cells
-}
-
-function isMarkdownTableRow(row: string) {
-  const trimmed = row.trim()
-  return trimmed.includes('|') && splitMarkdownTableRow(trimmed).length >= 2
-}
-
-function isMarkdownTableDivider(row: string) {
-  if (!isMarkdownTableRow(row)) return false
-  const cells = splitMarkdownTableRow(row)
-  return cells.length >= 2 && cells.every((cell) => /^:?[=-]{3,}:?$/.test(cell.replace(/\s+/g, '')))
-}
-
-function getMarkdownTableAlignments(dividerRow: string) {
-  return splitMarkdownTableRow(dividerRow).map((cell) => {
-    const normalized = cell.replace(/\s+/g, '')
-    const left = normalized.startsWith(':')
-    const right = normalized.endsWith(':')
-    if (left && right) return 'center'
-    if (right) return 'right'
-    return 'left'
-  })
-}
-
-function renderMarkdownTable(headerRow: string, dividerRow: string, bodyRows: string[]) {
-  const headers = splitMarkdownTableRow(headerRow)
-  const alignments = getMarkdownTableAlignments(dividerRow)
-  const columnCount = Math.max(
-    headers.length,
-    alignments.length,
-    ...bodyRows.map((row) => splitMarkdownTableRow(row).length),
-  )
-  const normalizeCells = (cells: string[]) =>
-    Array.from({ length: columnCount }, (_, index) => cells[index] ?? '')
-  const renderCell = (tag: 'td' | 'th', cell: string, index: number) => {
-    const align = alignments[index] ?? 'left'
-    return `<${tag} style="text-align:${align}">${escapeMarkdownInline(cell)}</${tag}>`
-  }
-  const thead = `<thead><tr>${normalizeCells(headers)
-    .map((cell, cellIndex) => renderCell('th', cell, cellIndex))
-    .join('')}</tr></thead>`
-  const tbodyRows = bodyRows
-    .map((row) => normalizeCells(splitMarkdownTableRow(row)))
-    .filter((cells) => cells.some(Boolean))
-    .map((cells) => `<tr>${cells.map((cell, cellIndex) => renderCell('td', cell, cellIndex)).join('')}</tr>`)
-    .join('')
-  const tbody = tbodyRows ? `<tbody>${tbodyRows}</tbody>` : ''
-  return `<div class="markdown-table-wrap"><table>${thead}${tbody}</table></div>`
-}
-
-function classifyCodeToken(token: string) {
-  if (/^https?:\/\//.test(token)) return 'token-url'
-  if (/^(\/\/|#)/.test(token)) return 'token-comment'
-  if (/^['"]/.test(token)) return 'token-string'
-  if (/^\d/.test(token)) return 'token-number'
-  if (/^(kubectl|helm|docker|npm|pnpm|yarn|bash|sh|curl|wget|git)$/.test(token)) return 'token-command'
-  if (
-    /^(const|let|var|function|return|if|else|for|while|class|new|import|from|export|async|await|try|catch|throw|switch|case|break|continue|true|false|null|undefined)$/.test(
-      token,
-    )
-  ) {
-    return 'token-keyword'
-  }
-  return 'token-operator'
-}
-
-function highlightCode(code: string, language = '') {
-  const tokenPattern =
-    /(https?:\/\/[^\s]+|\/\/.*$|#.*$|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:kubectl|helm|docker|npm|pnpm|yarn|bash|sh|curl|wget|git)\b|\b(?:const|let|var|function|return|if|else|for|while|class|new|import|from|export|async|await|try|catch|throw|switch|case|break|continue|true|false|null|undefined)\b|\b\d+(?:\.\d+)?\b|=>|===|!==|==|!=|&&|\|\||[=+-])/gm
-  let html = ''
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = tokenPattern.exec(code))) {
-    const token = match[0]
-    const offset = match.index
-    html += escapeHtml(code.slice(lastIndex, offset))
-    html += `<span class="${classifyCodeToken(token)}">${escapeHtml(token)}</span>`
-    lastIndex = offset + token.length
-  }
-
-  html += escapeHtml(code.slice(lastIndex))
-  return `<pre><code data-language="${escapeAttribute(language)}">${html}</code></pre>`
-}
-
-function renderMarkdownPreview(markdown: string) {
-  const source = String(markdown || '').replace(/\r\n/g, '\n')
-  if (!source.trim()) {
-    return '<p class="operation-empty">预览会显示在这里，支持标题、列表、引用、代码块。</p>'
-  }
-
-  const lines = source.split('\n')
-  const blocks: string[] = []
-  let index = 0
-
-  while (index < lines.length) {
-    const line = lines[index]
-
-    if (/^```/.test(line)) {
-      const language = line.slice(3).trim()
-      const codeLines: string[] = []
-      index += 1
-      while (index < lines.length && !/^```/.test(lines[index])) {
-        codeLines.push(lines[index])
-        index += 1
-      }
-      if (index < lines.length) index += 1
-      blocks.push(highlightCode(codeLines.join('\n'), language))
-      continue
-    }
-
-    if (!line.trim()) {
-      index += 1
-      continue
-    }
-
-    const heading = line.match(/^(#{1,6})\s+(.*)$/)
-    if (heading) {
-      const level = heading[1].length
-      const headingText = heading[2].trim()
-      let headingClass = ''
-      if (level === 2) headingClass = 'markdown-section-break'
-      if (level === 4 && !/^\d+\./.test(headingText) && headingText !== '操作文档') {
-        headingClass = 'markdown-package-break'
-      }
-      blocks.push(`<h${level}${headingClass ? ` class="${headingClass}"` : ''}>${escapeMarkdownInline(headingText)}</h${level}>`)
-      index += 1
-      continue
-    }
-
-    if (
-      isMarkdownTableRow(line) &&
-      index + 1 < lines.length &&
-      isMarkdownTableDivider(lines[index + 1])
-    ) {
-      const headerRow = line
-      const dividerRow = lines[index + 1]
-      const bodyRows: string[] = []
-      index += 2
-      while (
-        index < lines.length &&
-        lines[index].trim() &&
-        isMarkdownTableRow(lines[index]) &&
-        !isMarkdownTableDivider(lines[index])
-      ) {
-        bodyRows.push(lines[index])
-        index += 1
-      }
-      blocks.push(renderMarkdownTable(headerRow, dividerRow, bodyRows))
-      continue
-    }
-
-    if (/^>\s?/.test(line)) {
-      const quoteLines: string[] = []
-      while (index < lines.length && /^>\s?/.test(lines[index])) {
-        quoteLines.push(lines[index].replace(/^>\s?/, ''))
-        index += 1
-      }
-      blocks.push(`<blockquote>${renderInlineLines(quoteLines)}</blockquote>`)
-      continue
-    }
-
-    if (/^(-|\*)\s+/.test(line)) {
-      const items: string[] = []
-      while (index < lines.length && /^(-|\*)\s+/.test(lines[index])) {
-        items.push(lines[index].replace(/^(-|\*)\s+/, ''))
-        index += 1
-      }
-      blocks.push(`<ul>${items.map((item) => `<li>${escapeMarkdownInline(item)}</li>`).join('')}</ul>`)
-      continue
-    }
-
-    if (/^\d+\.\s+/.test(line)) {
-      const items: string[] = []
-      while (index < lines.length && /^\d+\.\s+/.test(lines[index])) {
-        items.push(lines[index].replace(/^\d+\.\s+/, ''))
-        index += 1
-      }
-      blocks.push(`<ol>${items.map((item) => `<li>${escapeMarkdownInline(item)}</li>`).join('')}</ol>`)
-      continue
-    }
-
-    if (/^---+$/.test(line.trim())) {
-      blocks.push('<hr />')
-      index += 1
-      continue
-    }
-
-    const paragraphLines: string[] = []
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !/^```/.test(lines[index]) &&
-      !/^(#{1,6})\s+/.test(lines[index]) &&
-      !(
-        isMarkdownTableRow(lines[index]) &&
-        index + 1 < lines.length &&
-        isMarkdownTableDivider(lines[index + 1])
-      ) &&
-      !/^>\s?/.test(lines[index]) &&
-      !/^(-|\*)\s+/.test(lines[index]) &&
-      !/^\d+\.\s+/.test(lines[index]) &&
-      !/^---+$/.test(lines[index].trim())
-    ) {
-      paragraphLines.push(lines[index])
-      index += 1
-    }
-    blocks.push(`<p>${renderInlineLines(paragraphLines)}</p>`)
-  }
-
-  return blocks.join('')
-}
-
-function findInlineWrapperAtCursor(
-  value: string,
-  position: number,
-  prefix: string,
-  suffix: string,
-) {
-  const lineStart = value.lastIndexOf('\n', Math.max(0, position - 1)) + 1
-  const lineEndIndex = value.indexOf('\n', position)
-  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex
-  const line = value.slice(lineStart, lineEnd)
-  const cursorOffset = position - lineStart
-  let searchFrom = 0
-
-  while (searchFrom < line.length) {
-    const openIndex = line.indexOf(prefix, searchFrom)
-    if (openIndex === -1) break
-    const contentStart = openIndex + prefix.length
-    const closeIndex = line.indexOf(suffix, contentStart)
-    if (closeIndex === -1) break
-    if (cursorOffset >= contentStart && cursorOffset <= closeIndex) {
-      return {
-        wrapperStart: lineStart + openIndex,
-        contentStart: lineStart + contentStart,
-        contentEnd: lineStart + closeIndex,
-        wrapperEnd: lineStart + closeIndex + suffix.length,
-      }
-    }
-    searchFrom = closeIndex + suffix.length
-  }
-
-  return null
-}
-
-function findEnclosingCodeBlock(value: string, start: number, end: number) {
-  const fencePattern = /(^|\n)```([^\n]*)\n([\s\S]*?)\n```(?=\n|$)/g
-  let match: RegExpExecArray | null
-
-  while ((match = fencePattern.exec(value))) {
-    const leadingBreak = match[1].length
-    const blockStart = match.index + leadingBreak
-    const openingFence = `\`\`\`${match[2]}`
-    const contentStart = blockStart + openingFence.length + 1
-    const content = match[3]
-    const contentEnd = contentStart + content.length
-    const blockEnd = blockStart + match[0].length - leadingBreak
-
-    if (start >= blockStart && end <= blockEnd) {
-      return {
-        blockStart,
-        blockEnd,
-        contentStart,
-        contentEnd,
-        content,
-      }
-    }
-  }
-
-  return null
-}
-
 const operationEventOptions: Array<{
   label: string
   type: ProjectPackageEventType
@@ -781,6 +487,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [eventTitle, setEventTitle] = useState('')
   const [eventType, setEventType] = useState<ProjectPackageEventType>('upgrade')
   const [operationDialogOpen, setOperationDialogOpen] = useState(false)
+  const [operationEditorReady, setOperationEditorReady] = useState(false)
   const [operationTitle, setOperationTitle] = useState('')
   const [operationContent, setOperationContent] = useState('')
   const [operationKind, setOperationKind] = useState<ProjectPackageOperationKind>('document')
@@ -796,6 +503,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [todoFilterConditions, setTodoFilterConditions] = useState<TodoFilterCondition[]>([])
   const [todoPickerOpen, setTodoPickerOpen] = useState(false)
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false)
+  const [exportEditorReady, setExportEditorReady] = useState(false)
   const [exportFileName, setExportFileName] = useState('')
   const [exportContent, setExportContent] = useState('')
   const [marketOpen, setMarketOpen] = useState(false)
@@ -834,8 +542,6 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   >([])
   const [busyAction, setBusyAction] = useState('')
   const [copiedValue, setCopiedValue] = useState('')
-  const operationTextareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const exportTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const marketDetailRequestIdRef = useRef(0)
   const todoPickerSearchRef = useRef<HTMLInputElement | null>(null)
   const todoPickerOptionsRef = useRef<HTMLDivElement | null>(null)
@@ -1177,6 +883,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   }
 
   function openOperationDialog(target: PendingOperationTarget, kind: ProjectPackageOperationKind) {
+    setOperationEditorReady(false)
     setPendingOperationTarget(target)
     setOperationKind(target?.operation?.kind ?? kind)
     setOperationTitle(
@@ -1279,198 +986,6 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     }))
   }
 
-  function applyTextareaChange(nextValue: string, selectionStart: number, selectionEnd: number) {
-    setOperationContent(nextValue)
-    window.requestAnimationFrame(() => {
-      const textarea = operationTextareaRef.current
-      if (!textarea) return
-      textarea.focus()
-      textarea.setSelectionRange(selectionStart, selectionEnd)
-    })
-  }
-
-  function toggleWrappedSelection(prefix: string, suffix: string, placeholder: string) {
-    const textarea = operationTextareaRef.current
-    if (!textarea) return
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const value = operationContent
-    const selectedText = value.slice(start, end)
-
-    if (
-      selectedText.length >= prefix.length + suffix.length &&
-      selectedText.startsWith(prefix) &&
-      selectedText.endsWith(suffix)
-    ) {
-      const content = selectedText.slice(prefix.length, selectedText.length - suffix.length)
-      const nextValue = `${value.slice(0, start)}${content}${value.slice(end)}`
-      applyTextareaChange(nextValue, start, start + content.length)
-      return
-    }
-
-    if (
-      start >= prefix.length &&
-      value.slice(start - prefix.length, start) === prefix &&
-      value.slice(end, end + suffix.length) === suffix
-    ) {
-      const nextValue = `${value.slice(0, start - prefix.length)}${selectedText}${value.slice(end + suffix.length)}`
-      const nextStart = start - prefix.length
-      applyTextareaChange(nextValue, nextStart, nextStart + selectedText.length)
-      return
-    }
-
-    if (!selectedText) {
-      const wrapper = findInlineWrapperAtCursor(value, start, prefix, suffix)
-      if (wrapper) {
-        const content = value.slice(wrapper.contentStart, wrapper.contentEnd)
-        const cursorOffset = start - wrapper.contentStart
-        const nextValue = `${value.slice(0, wrapper.wrapperStart)}${content}${value.slice(wrapper.wrapperEnd)}`
-        const nextCursor = wrapper.wrapperStart + Math.max(0, Math.min(cursorOffset, content.length))
-        applyTextareaChange(nextValue, nextCursor, nextCursor)
-        return
-      }
-    }
-
-    const content = selectedText || placeholder
-    const nextValue = `${value.slice(0, start)}${prefix}${content}${suffix}${value.slice(end)}`
-    const contentStart = start + prefix.length
-    applyTextareaChange(nextValue, contentStart, contentStart + content.length)
-  }
-
-  function toggleCodeBlockSelection() {
-    const textarea = operationTextareaRef.current
-    if (!textarea) return
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const value = operationContent
-    const enclosingBlock = findEnclosingCodeBlock(value, start, end)
-
-    if (enclosingBlock && start >= enclosingBlock.contentStart && end <= enclosingBlock.contentEnd) {
-      const nextValue = `${value.slice(0, enclosingBlock.blockStart)}${enclosingBlock.content}${value.slice(enclosingBlock.blockEnd)}`
-      const nextStart = enclosingBlock.blockStart + (start - enclosingBlock.contentStart)
-      const nextEnd = enclosingBlock.blockStart + (end - enclosingBlock.contentStart)
-      applyTextareaChange(nextValue, nextStart, nextEnd)
-      return
-    }
-
-    const selectedText = value.slice(start, end)
-    const leadingBreak = start > 0 && value[start - 1] !== '\n' ? '\n' : ''
-    const trailingBreak = end < value.length && value[end] !== '\n' ? '\n' : ''
-    const content = selectedText || '在这里输入代码'
-    const block = `${leadingBreak}\`\`\`\n${content}\n\`\`\`${trailingBreak}`
-    const nextValue = `${value.slice(0, start)}${block}${value.slice(end)}`
-    const contentStart = start + leadingBreak.length + '```\n'.length
-    applyTextareaChange(nextValue, contentStart, contentStart + content.length)
-  }
-
-  function formatOperationDocSelection(format: 'highlight' | 'inline-code' | 'code-block') {
-    if (format === 'highlight') {
-      toggleWrappedSelection('==', '==', '高亮内容')
-      return
-    }
-    if (format === 'inline-code') {
-      toggleWrappedSelection('`', '`', '命令')
-      return
-    }
-    toggleCodeBlockSelection()
-  }
-
-  function applyExportTextareaChange(nextValue: string, selectionStart: number, selectionEnd: number) {
-    setExportContent(nextValue)
-    window.requestAnimationFrame(() => {
-      const textarea = exportTextareaRef.current
-      if (!textarea) return
-      textarea.focus()
-      textarea.setSelectionRange(selectionStart, selectionEnd)
-    })
-  }
-
-  function toggleExportWrappedSelection(prefix: string, suffix: string, placeholder: string) {
-    const textarea = exportTextareaRef.current
-    if (!textarea) return
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const value = exportContent
-    const selectedText = value.slice(start, end)
-
-    if (
-      selectedText.length >= prefix.length + suffix.length &&
-      selectedText.startsWith(prefix) &&
-      selectedText.endsWith(suffix)
-    ) {
-      const content = selectedText.slice(prefix.length, selectedText.length - suffix.length)
-      const nextValue = `${value.slice(0, start)}${content}${value.slice(end)}`
-      applyExportTextareaChange(nextValue, start, start + content.length)
-      return
-    }
-
-    if (
-      start >= prefix.length &&
-      value.slice(start - prefix.length, start) === prefix &&
-      value.slice(end, end + suffix.length) === suffix
-    ) {
-      const nextValue = `${value.slice(0, start - prefix.length)}${selectedText}${value.slice(end + suffix.length)}`
-      const nextStart = start - prefix.length
-      applyExportTextareaChange(nextValue, nextStart, nextStart + selectedText.length)
-      return
-    }
-
-    if (!selectedText) {
-      const wrapper = findInlineWrapperAtCursor(value, start, prefix, suffix)
-      if (wrapper) {
-        const content = value.slice(wrapper.contentStart, wrapper.contentEnd)
-        const cursorOffset = start - wrapper.contentStart
-        const nextValue = `${value.slice(0, wrapper.wrapperStart)}${content}${value.slice(wrapper.wrapperEnd)}`
-        const nextCursor = wrapper.wrapperStart + Math.max(0, Math.min(cursorOffset, content.length))
-        applyExportTextareaChange(nextValue, nextCursor, nextCursor)
-        return
-      }
-    }
-
-    const content = selectedText || placeholder
-    const nextValue = `${value.slice(0, start)}${prefix}${content}${suffix}${value.slice(end)}`
-    const contentStart = start + prefix.length
-    applyExportTextareaChange(nextValue, contentStart, contentStart + content.length)
-  }
-
-  function toggleExportCodeBlockSelection() {
-    const textarea = exportTextareaRef.current
-    if (!textarea) return
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const value = exportContent
-    const enclosingBlock = findEnclosingCodeBlock(value, start, end)
-
-    if (enclosingBlock && start >= enclosingBlock.contentStart && end <= enclosingBlock.contentEnd) {
-      const nextValue = `${value.slice(0, enclosingBlock.blockStart)}${enclosingBlock.content}${value.slice(enclosingBlock.blockEnd)}`
-      const nextStart = enclosingBlock.blockStart + (start - enclosingBlock.contentStart)
-      const nextEnd = enclosingBlock.blockStart + (end - enclosingBlock.contentStart)
-      applyExportTextareaChange(nextValue, nextStart, nextEnd)
-      return
-    }
-
-    const selectedText = value.slice(start, end)
-    const leadingBreak = start > 0 && value[start - 1] !== '\n' ? '\n' : ''
-    const trailingBreak = end < value.length && value[end] !== '\n' ? '\n' : ''
-    const content = selectedText || '在这里输入代码'
-    const block = `${leadingBreak}\`\`\`\n${content}\n\`\`\`${trailingBreak}`
-    const nextValue = `${value.slice(0, start)}${block}${value.slice(end)}`
-    const contentStart = start + leadingBreak.length + '```\n'.length
-    applyExportTextareaChange(nextValue, contentStart, contentStart + content.length)
-  }
-
-  function formatExportPreviewSelection(format: 'highlight' | 'inline-code' | 'code-block') {
-    if (format === 'highlight') {
-      toggleExportWrappedSelection('==', '==', '高亮内容')
-      return
-    }
-    if (format === 'inline-code') {
-      toggleExportWrappedSelection('`', '`', '命令')
-      return
-    }
-    toggleExportCodeBlockSelection()
-  }
-
   async function submitEvent() {
     const assigneeUserId = Number(eventAssigneeUserId)
     if (!eventTitle.trim() || !Number.isInteger(assigneeUserId) || assigneeUserId <= 0) return
@@ -1570,6 +1085,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     setBusyAction('export')
     try {
       const result = await onExportTimeline()
+      setExportEditorReady(false)
       setExportFileName(result.fileName)
       setExportContent(result.markdown)
       setExportPreviewOpen(true)
@@ -2091,7 +1607,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                 : '添加操作文档'}
             </DialogTitle>
             <DialogDescription>
-              支持 Markdown，也可以先选中文本再用工具栏插入格式。
+              记录交付过程中需要保留的步骤、命令和说明。
             </DialogDescription>
           </DialogHeader>
           <div className="operation-doc-form">
@@ -2105,66 +1621,19 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                 />
               </Label>
             </div>
-            <div className="operation-doc-editor-layout">
-              <section className="operation-doc-pane">
-                <div className="operation-doc-pane-head">
-                  <span>Markdown 内容</span>
-                  <div className="operation-doc-toolbar" role="toolbar" aria-label="文档格式工具">
-                    <Button
-                      className="operation-doc-toolbar-button"
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      title="高亮"
-                      onClick={() => formatOperationDocSelection('highlight')}
-                    >
-                      <Highlighter size={14} /> 高亮
-                    </Button>
-                    <Button
-                      className="operation-doc-toolbar-button"
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      title="行内代码"
-                      onClick={() => formatOperationDocSelection('inline-code')}
-                    >
-                      <Code size={14} /> 行内代码
-                    </Button>
-                    <Button
-                      className="operation-doc-toolbar-button"
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      title="代码块"
-                      onClick={() => formatOperationDocSelection('code-block')}
-                    >
-                      <CodeBlock size={14} /> 代码块
-                    </Button>
-                  </div>
-                </div>
-                <Textarea
-                  ref={operationTextareaRef}
-                  className="operation-doc-textarea"
+            <MarkdownEditorLoadBoundary>
+              <Suspense fallback={<div className="markdown-wysiwyg-loading" role="status">正在加载编辑器…</div>}>
+                <MarkdownWysiwygEditor
+                  key={`operation-${pendingOperationTarget?.operation?.id ?? `${pendingOperationTarget?.eventId ?? 'new'}-${pendingOperationTarget?.groupId ?? 'event'}`}`}
+                  ariaLabel="操作文档内容"
                   value={operationContent}
-                  onChange={(event) => setOperationContent(event.target.value)}
-                  placeholder={`支持 Markdown，也可以先选中文本再用上方工具栏插入格式。\n\n例如：\n## 操作事项\n- 检查版本\n- 记录执行人\n\n\`\`\`bash\nkubectl get pods -A\n\`\`\``}
+                  onChange={setOperationContent}
+                  onReady={() => setOperationEditorReady(true)}
+                  placeholder="输入操作步骤、命令或说明…"
                 />
-              </section>
-              <section className="operation-doc-pane operation-doc-preview-pane" aria-live="polite">
-                <div className="operation-doc-pane-head">
-                  <span>实时预览</span>
-                  <small>支持 Markdown，也支持工具栏一键插入格式</small>
-                </div>
-                <div
-                  className="operation-doc-preview"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdownPreview(operationContent) }}
-                />
-              </section>
-            </div>
+              </Suspense>
+            </MarkdownEditorLoadBoundary>
           </div>
-          <p className="operation-doc-hint">
-            支持直接输入 Markdown，也可以先选中文字再点击上方工具栏。高亮会自动转成 <code>==内容==</code>，行内代码会转成 <code>`命令`</code>，代码块会自动插入三反引号围栏。
-          </p>
           <DialogFooter className="operation-doc-footer">
             <Button variant="outline" type="button" onClick={() => setOperationDialogOpen(false)}>
               取消
@@ -2174,6 +1643,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
               onClick={() => void submitOperation()}
               disabled={
                 busyAction === 'operation' ||
+                !operationEditorReady ||
                 !operationTitle.trim() ||
                 (operationKind === 'document' && !operationContent.trim())
               }
@@ -2193,71 +1663,24 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
             </DialogDescription>
           </DialogHeader>
           <div className="operation-doc-form">
-            <div className="operation-doc-editor-layout">
-              <section className="operation-doc-pane">
-                <div className="operation-doc-pane-head">
-                  <span>导出内容</span>
-                  <div className="operation-doc-toolbar" role="toolbar" aria-label="导出内容格式工具">
-                    <Button
-                      className="operation-doc-toolbar-button"
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      title="高亮"
-                      onClick={() => formatExportPreviewSelection('highlight')}
-                    >
-                      <Highlighter size={14} /> 高亮
-                    </Button>
-                    <Button
-                      className="operation-doc-toolbar-button"
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      title="行内代码"
-                      onClick={() => formatExportPreviewSelection('inline-code')}
-                    >
-                      <Code size={14} /> 行内代码
-                    </Button>
-                    <Button
-                      className="operation-doc-toolbar-button"
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      title="代码块"
-                      onClick={() => formatExportPreviewSelection('code-block')}
-                    >
-                      <CodeBlock size={14} /> 代码块
-                    </Button>
-                  </div>
-                </div>
-                <Textarea
-                  ref={exportTextareaRef}
-                  className="operation-doc-textarea"
-                  value={exportContent}
-                  onChange={(event) => setExportContent(event.target.value)}
-                  placeholder="这里会展示导出的项目时间线 Markdown 内容。"
+            <MarkdownEditorLoadBoundary>
+              <Suspense fallback={<div className="markdown-wysiwyg-loading" role="status">正在加载编辑器…</div>}>
+                <MarkdownWysiwygEditor
+                  key={`export-${exportFileName}`}
+                ariaLabel="时间线导出内容"
+                value={exportContent}
+                onChange={setExportContent}
+                onReady={() => setExportEditorReady(true)}
+                placeholder="当前项目没有可导出的时间线内容"
                 />
-              </section>
-              <section className="operation-doc-pane operation-doc-preview-pane" aria-live="polite">
-                <div className="operation-doc-pane-head">
-                  <span>实时预览</span>
-                  <small>确认无误后再导出</small>
-                </div>
-                <div
-                  className="operation-doc-preview"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdownPreview(exportContent) }}
-                />
-              </section>
-            </div>
+              </Suspense>
+            </MarkdownEditorLoadBoundary>
           </div>
-          <p className="operation-doc-hint">
-            导出前可以直接调整 Markdown 内容，也可以先选中文字再点击上方工具栏插入格式。
-          </p>
           <DialogFooter className="operation-doc-footer">
             <Button variant="outline" type="button" onClick={() => setExportPreviewOpen(false)}>
               取消
             </Button>
-            <Button type="button" onClick={confirmExport} disabled={!exportContent.trim()}>
+            <Button type="button" onClick={confirmExport} disabled={!exportEditorReady || !exportContent.trim()}>
               确认导出
             </Button>
           </DialogFooter>
