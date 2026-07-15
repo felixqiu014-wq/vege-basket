@@ -6078,10 +6078,6 @@ textarea:focus {
   overflow: hidden;
 }
 
-.operation-todo-dialog {
-  top: 45%;
-}
-
 .operation-doc-header {
   gap: 4px;
 }
@@ -8184,10 +8180,6 @@ textarea:focus {
   .markdown-wysiwyg-loading {
     min-height: 340px;
     height: min(520px, calc(100dvh - 280px));
-  }
-
-  .operation-todo-dialog {
-    top: 42%;
   }
 
   .operation-doc-meta-row.with-association {

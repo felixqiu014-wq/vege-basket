@@ -1597,7 +1597,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       </Dialog>
 
       <Dialog open={operationDialogOpen} onOpenChange={setOperationDialogOpen}>
-        <DialogContent className="package-operation-dialog operation-todo-dialog">
+        <DialogContent className="package-operation-dialog">
           <DialogHeader className="operation-doc-header">
             <DialogTitle>
               {pendingOperationTarget?.operation
