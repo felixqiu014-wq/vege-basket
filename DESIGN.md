@@ -7,12 +7,12 @@ colors:
   ink-light: "oklch(0.2464 0.0358 168.9829)"
   muted-ink-light: "oklch(0.5836 0.0427 172.2348)"
   line-light: "oklch(0.9161 0.0142 174.1306)"
-  brand-green-light: "oklch(0.6373 0.1362 162.5170)"
+  brand-green-light: "oklch(0.5048 0.0836 176.32)"
   canvas-dark: "oklch(0.1822 0 0)"
   surface-dark: "oklch(0.2046 0 0)"
   ink-dark: "oklch(0.9288 0.0126 255.5078)"
   line-dark: "oklch(0.2809 0 0)"
-  brand-green-dark: "oklch(0.4365 0.1044 156.7556)"
+  brand-green-dark: "oklch(0.6631 0.0889 173.12)"
   destructive: "oklch(0.6356 0.2082 25.3782)"
 typography:
   display:
@@ -100,7 +100,7 @@ The palette combines neutral work surfaces with a green action signal. Light mod
 
 ### Primary
 
-- **Workbench Green** (`oklch(0.6373 0.1362 162.5170)` light, `oklch(0.4365 0.1044 156.7556)` dark): Primary actions, selected state, notification counts, and availability indicators.
+- **Workbench Green** (`oklch(0.5048 0.0836 176.32)` light, `oklch(0.6631 0.0889 173.12)` dark): Primary actions, selected state, notification counts, and availability indicators.
 
 ### Neutral
 
@@ -112,6 +112,10 @@ The palette combines neutral work surfaces with a green action signal. Light mod
 - **Danger Red** (`oklch(0.6356 0.2082 25.3782)`): Destructive actions and error text only.
 
 **The Signal Rule.** Workbench Green marks action or state. It should not become a page background or decorative wash.
+
+### Editor Semantic Colors
+
+Editor color communicates meaning rather than decoration. Primary green is limited to selection, active, and focus states. Authored highlights use amber, links use blue, and blockquotes plus inline code use neutral tones. Syntax highlighting may use a controlled multicolor token palette, but it must remain scoped to code and preserve readable contrast in both themes.
 
 ## Typography
 

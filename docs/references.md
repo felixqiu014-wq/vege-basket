@@ -6,6 +6,7 @@
 | --- | --- |
 | Scripts and dependency roles | `package.json`, `package-lock.json` |
 | Browser API contracts | `src/api.ts`, `src/types.ts` |
+| WYSIWYG Markdown editor contract | `src/components/markdown-wysiwyg-editor.tsx`, `src/App.css` |
 | HTTP routes and authorization | `server/index.ts` |
 | Database schema | `server/schema.ts` |
 | Encryption format | `server/crypto.ts` |

@@ -1,4 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  forwardRef,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentPropsWithoutRef,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -18,14 +28,17 @@ import {
   TextItalic,
   TextStrikethrough,
   Trash,
+  X,
 } from '@phosphor-icons/react'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
+import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { Highlight } from '@tiptap/extension-highlight'
 import { Link } from '@tiptap/extension-link'
 import { Markdown } from '@tiptap/markdown'
 import { Placeholder } from '@tiptap/extension-placeholder'
 import StarterKit from '@tiptap/starter-kit'
 import { TableKit } from '@tiptap/extension-table'
+import { common, createLowlight } from 'lowlight'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +46,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Popover,
+  PopoverClose,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
 type MarkdownWysiwygEditorProps = {
@@ -43,12 +62,10 @@ type MarkdownWysiwygEditorProps = {
   value: string
 }
 
-type ToolbarButtonProps = {
+type ToolbarButtonProps = Omit<ComponentPropsWithoutRef<'button'>, 'children'> & {
   active?: boolean
   children: ReactNode
-  disabled?: boolean
   label: string
-  onClick: () => void
 }
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6
@@ -75,6 +92,8 @@ const MarkdownHighlight = Highlight.extend({
   renderMarkdown: (node, helpers) =>
     `==${helpers.renderChildren(node.content ?? [])}==`,
 })
+
+const syntaxHighlighter = createLowlight(common)
 
 const headingOptions: Array<{ label: string; value: 'paragraph' | HeadingLevel }> = [
   { label: '正文', value: 'paragraph' },
@@ -114,21 +133,23 @@ const SafeLink = Link.extend({
   },
 })
 
-function ToolbarButton({ active, children, disabled, label, onClick }: ToolbarButtonProps) {
-  return (
+const ToolbarButton = forwardRef<HTMLButtonElement, ToolbarButtonProps>(
+  ({ active, children, className, label, ...props }, ref) => (
     <button
+      ref={ref}
       type="button"
-      className={cn('markdown-wysiwyg-tool', active === true && 'is-active')}
+      className={cn('markdown-wysiwyg-tool', active === true && 'is-active', className)}
       aria-label={label}
       aria-pressed={active}
       data-tooltip={label}
-      disabled={disabled}
-      onClick={onClick}
+      {...props}
     >
       {children}
     </button>
-  )
-}
+  ),
+)
+
+ToolbarButton.displayName = 'ToolbarButton'
 
 function ToolbarSeparator() {
   return <span className="markdown-wysiwyg-toolbar-separator" aria-hidden="true" />
@@ -146,13 +167,24 @@ export function MarkdownWysiwygEditor({
   const lastEmittedMarkdownRef = useRef(value)
   const initialValueHandledRef = useRef(false)
   const linkInputRef = useRef<HTMLInputElement | null>(null)
+  const linkSelectionPreparedRef = useRef(false)
+  const linkSelectionRef = useRef<{ from: number; to: number } | null>(null)
+  const restoreEditorFocusRef = useRef(false)
+  const linkInputId = useId()
+  const linkErrorId = `${linkInputId}-error`
   const [linkEditorOpen, setLinkEditorOpen] = useState(false)
+  const [editingExistingLink, setEditingExistingLink] = useState(false)
   const [linkHref, setLinkHref] = useState('')
   const [linkError, setLinkError] = useState('')
   const extensions = useMemo(
     () => [
       StarterKit.configure({
+        codeBlock: false,
         link: false,
+      }),
+      CodeBlockLowlight.configure({
+        languageClassPrefix: 'language-',
+        lowlight: syntaxHighlighter,
       }),
       SafeLink.configure({
         autolink: true,
@@ -216,7 +248,6 @@ export function MarkdownWysiwygEditor({
       highlight: currentEditor.isActive('highlight'),
       italic: currentEditor.isActive('italic'),
       link: currentEditor.isActive('link'),
-      linkHref: String(currentEditor.getAttributes('link').href ?? ''),
       orderedList: currentEditor.isActive('orderedList'),
       strike: currentEditor.isActive('strike'),
       table: currentEditor.isActive('table'),
@@ -251,11 +282,26 @@ export function MarkdownWysiwygEditor({
     editor.chain().focus().setHeading({ level: value }).run()
   }
 
-  function openLinkEditor() {
-    setLinkHref(toolbarState.linkHref)
+  function prepareLinkEditor() {
+    const { from, to } = editor.state.selection
+    linkSelectionPreparedRef.current = true
+    linkSelectionRef.current = { from, to }
+    setEditingExistingLink(editor.isActive('link'))
+    setLinkHref(String(editor.getAttributes('link').href ?? ''))
+  }
+
+  function handleLinkEditorOpenChange(nextOpen: boolean) {
+    if (nextOpen && !linkSelectionPreparedRef.current) prepareLinkEditor()
+    if (!nextOpen) linkSelectionPreparedRef.current = false
+
     setLinkError('')
-    setLinkEditorOpen(true)
-    window.requestAnimationFrame(() => linkInputRef.current?.focus())
+    setLinkEditorOpen(nextOpen)
+  }
+
+  function restoreLinkSelection() {
+    const selection = linkSelectionRef.current
+    const chain = editor.chain().focus()
+    return selection ? chain.setTextSelection(selection) : chain
   }
 
   function submitLink(event: FormEvent<HTMLFormElement>) {
@@ -266,15 +312,15 @@ export function MarkdownWysiwygEditor({
       return
     }
 
-    editor.chain().focus().extendMarkRange('link').setLink({ href: normalizedHref }).run()
-    setLinkEditorOpen(false)
-    setLinkError('')
+    restoreLinkSelection().extendMarkRange('link').setLink({ href: normalizedHref }).run()
+    restoreEditorFocusRef.current = true
+    handleLinkEditorOpenChange(false)
   }
 
   function removeLink() {
-    editor.chain().focus().extendMarkRange('link').unsetLink().run()
-    setLinkEditorOpen(false)
-    setLinkError('')
+    restoreLinkSelection().extendMarkRange('link').unsetLink().run()
+    restoreEditorFocusRef.current = true
+    handleLinkEditorOpenChange(false)
   }
 
   const currentBlockLabel = toolbarState.heading
@@ -335,13 +381,74 @@ export function MarkdownWysiwygEditor({
         >
           <Highlighter size={17} />
         </ToolbarButton>
-        <ToolbarButton
-          label="链接"
-          active={toolbarState.link}
-          onClick={openLinkEditor}
-        >
-          <LinkSimple size={17} />
-        </ToolbarButton>
+        <Popover open={linkEditorOpen} onOpenChange={handleLinkEditorOpenChange}>
+          <PopoverTrigger asChild>
+            <ToolbarButton
+              label="链接"
+              active={toolbarState.link}
+              onPointerDown={() => {
+                if (!linkEditorOpen) prepareLinkEditor()
+              }}
+            >
+              <LinkSimple size={17} />
+            </ToolbarButton>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            side="bottom"
+            className="markdown-wysiwyg-link-popover"
+            aria-label="编辑链接"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault()
+              linkInputRef.current?.focus()
+              linkInputRef.current?.select()
+            }}
+            onCloseAutoFocus={(event) => {
+              if (!restoreEditorFocusRef.current) return
+              event.preventDefault()
+              restoreEditorFocusRef.current = false
+              window.requestAnimationFrame(() => editor.commands.focus())
+            }}
+          >
+            <form className="markdown-wysiwyg-link-form" onSubmit={submitLink}>
+              <div className="markdown-wysiwyg-link-header">
+                <label htmlFor={linkInputId}>链接地址</label>
+                <PopoverClose asChild>
+                  <button
+                    type="button"
+                    className="markdown-wysiwyg-link-close"
+                    aria-label="关闭链接编辑"
+                  >
+                    <X size={15} />
+                  </button>
+                </PopoverClose>
+              </div>
+              <div className="markdown-wysiwyg-link-row">
+                <input
+                  id={linkInputId}
+                  ref={linkInputRef}
+                  value={linkHref}
+                  aria-describedby={linkError ? linkErrorId : undefined}
+                  aria-invalid={Boolean(linkError)}
+                  onChange={(event) => {
+                    setLinkHref(event.target.value)
+                    setLinkError('')
+                  }}
+                  placeholder="https://example.com"
+                />
+                {editingExistingLink ? (
+                  <button type="button" className="markdown-wysiwyg-link-remove" onClick={removeLink}>
+                    移除
+                  </button>
+                ) : null}
+                <button type="submit" className="markdown-wysiwyg-link-apply">
+                  应用
+                </button>
+              </div>
+              {linkError ? <p id={linkErrorId}>{linkError}</p> : null}
+            </form>
+          </PopoverContent>
+        </Popover>
 
         <ToolbarSeparator />
         <ToolbarButton
@@ -446,36 +553,6 @@ export function MarkdownWysiwygEditor({
           </ToolbarButton>
         </span>
 
-        {linkEditorOpen ? (
-          <form className="markdown-wysiwyg-link-popover" onSubmit={submitLink}>
-            <label htmlFor="markdown-wysiwyg-link-input">链接地址</label>
-            <div className="markdown-wysiwyg-link-row">
-              <input
-                id="markdown-wysiwyg-link-input"
-                ref={linkInputRef}
-                value={linkHref}
-                aria-invalid={Boolean(linkError)}
-                onChange={(event) => {
-                  setLinkHref(event.target.value)
-                  setLinkError('')
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') setLinkEditorOpen(false)
-                }}
-                placeholder="https://example.com"
-              />
-              {toolbarState.link ? (
-                <button type="button" className="markdown-wysiwyg-link-remove" onClick={removeLink}>
-                  移除
-                </button>
-              ) : null}
-              <button type="submit" className="markdown-wysiwyg-link-apply">
-                应用
-              </button>
-            </div>
-            {linkError ? <p>{linkError}</p> : null}
-          </form>
-        ) : null}
       </div>
 
       <EditorContent editor={editor} className="markdown-wysiwyg-canvas" />

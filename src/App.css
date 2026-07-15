@@ -6130,6 +6130,15 @@ textarea:focus {
 }
 
 .markdown-wysiwyg-editor {
+  --editor-highlight-bg: #f8df8b;
+  --editor-highlight-text: #3d2b00;
+  --editor-link: #175cd3;
+  --editor-token-comment: #8fa69d;
+  --editor-token-keyword: #ff7b9c;
+  --editor-token-string: #8bd49c;
+  --editor-token-number: #f2c96d;
+  --editor-token-title: #82aaff;
+  --editor-token-meta: #c792ea;
   position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -6140,6 +6149,12 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
+}
+
+.dark .markdown-wysiwyg-editor {
+  --editor-highlight-bg: #6b520e;
+  --editor-highlight-text: #fff2b5;
+  --editor-link: #79a9ff;
 }
 
 .markdown-wysiwyg-loading {
@@ -6190,7 +6205,7 @@ textarea:focus {
   color: var(--muted-text);
   cursor: pointer;
   outline: none;
-  transition: transform 120ms ease, background-color 120ms ease, color 120ms ease;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .markdown-wysiwyg-block-trigger {
@@ -6208,6 +6223,7 @@ textarea:focus {
   position: relative;
   width: 32px;
   height: 32px;
+  transition: transform 120ms ease, background-color 120ms ease, color 120ms ease;
 }
 
 .markdown-wysiwyg-block-trigger:focus-visible,
@@ -6215,7 +6231,6 @@ textarea:focus {
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 36%, transparent);
 }
 
-.markdown-wysiwyg-block-trigger:active,
 .markdown-wysiwyg-tool:active {
   transform: scale(0.96);
 }
@@ -6256,10 +6271,14 @@ textarea:focus {
   transform: translate(-50%, 0);
 }
 
+.markdown-wysiwyg-tool[aria-expanded='true']::after {
+  display: none;
+}
+
 @media (hover: hover) {
   .markdown-wysiwyg-block-trigger:hover,
   .markdown-wysiwyg-tool:hover {
-    background: color-mix(in oklch, var(--primary) 8%, var(--surface));
+    background: color-mix(in oklch, var(--foreground) 6%, var(--surface));
     color: var(--strong);
   }
 
@@ -6289,14 +6308,12 @@ textarea:focus {
 
 .markdown-wysiwyg-heading-menu {
   min-width: 136px;
+  animation: none;
 }
 
 .markdown-wysiwyg-link-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 6px;
-  z-index: 10;
-  width: min(380px, calc(100vw - 56px));
+  width: min(380px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--popover);
@@ -6304,12 +6321,47 @@ textarea:focus {
   padding: 10px;
 }
 
-.markdown-wysiwyg-link-popover label {
-  display: block;
-  margin-bottom: 6px;
+.markdown-wysiwyg-link-form {
+  display: grid;
+  gap: 7px;
+}
+
+.markdown-wysiwyg-link-header {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.markdown-wysiwyg-link-header label {
   color: var(--strong);
   font-size: 12px;
   font-weight: 600;
+}
+
+.markdown-wysiwyg-link-close {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-text);
+  cursor: pointer;
+}
+
+.markdown-wysiwyg-link-close:hover {
+  background: var(--muted);
+  color: var(--strong);
+}
+
+.markdown-wysiwyg-link-close:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 36%, transparent);
+  outline: none;
 }
 
 .markdown-wysiwyg-link-row {
@@ -6362,8 +6414,8 @@ textarea:focus {
   color: var(--destructive);
 }
 
-.markdown-wysiwyg-link-popover p {
-  margin: 6px 0 0;
+.markdown-wysiwyg-link-form p {
+  margin: 0;
   color: var(--destructive);
   font-size: 11px;
   line-height: 1.4;
@@ -6388,6 +6440,7 @@ textarea:focus {
   font-size: 14px;
   line-height: 1.75;
   letter-spacing: 0;
+  font-synthesis: style;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -6467,10 +6520,14 @@ textarea:focus {
   margin-top: 4px;
 }
 
+.markdown-wysiwyg-content em {
+  font-style: italic;
+}
+
 .markdown-wysiwyg-content blockquote {
-  border: 1px solid color-mix(in oklch, var(--primary) 20%, var(--line));
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, var(--line));
   border-radius: 6px;
-  background: color-mix(in oklch, var(--primary) 6%, var(--surface));
+  background: color-mix(in oklch, var(--foreground) 4%, var(--surface));
   padding: 10px 12px;
   color: var(--text);
 }
@@ -6481,16 +6538,16 @@ textarea:focus {
 
 .markdown-wysiwyg-content mark {
   border-radius: 3px;
-  background: color-mix(in oklch, #f4d06f 72%, var(--surface));
-  color: #14120b;
+  background: var(--editor-highlight-bg);
+  color: var(--editor-highlight-text);
   padding: 0.08em 0.24em;
 }
 
 .markdown-wysiwyg-content code {
   border-radius: 4px;
-  background: color-mix(in oklch, var(--primary) 10%, var(--surface));
+  background: color-mix(in oklch, var(--foreground) 7%, var(--surface));
   padding: 0.14em 0.38em;
-  color: color-mix(in oklch, var(--primary) 58%, var(--strong));
+  color: var(--strong);
   font-family: var(--mono);
   font-size: 0.92em;
   letter-spacing: 0;
@@ -6514,8 +6571,57 @@ textarea:focus {
   line-height: 1.7;
 }
 
+.markdown-wysiwyg-content pre .hljs-comment,
+.markdown-wysiwyg-content pre .hljs-quote {
+  color: var(--editor-token-comment);
+  font-style: italic;
+}
+
+.markdown-wysiwyg-content pre .hljs-keyword,
+.markdown-wysiwyg-content pre .hljs-selector-tag,
+.markdown-wysiwyg-content pre .hljs-built_in,
+.markdown-wysiwyg-content pre .hljs-name {
+  color: var(--editor-token-keyword);
+}
+
+.markdown-wysiwyg-content pre .hljs-string,
+.markdown-wysiwyg-content pre .hljs-attribute,
+.markdown-wysiwyg-content pre .hljs-literal,
+.markdown-wysiwyg-content pre .hljs-template-tag,
+.markdown-wysiwyg-content pre .hljs-template-variable,
+.markdown-wysiwyg-content pre .hljs-type {
+  color: var(--editor-token-string);
+}
+
+.markdown-wysiwyg-content pre .hljs-number,
+.markdown-wysiwyg-content pre .hljs-symbol,
+.markdown-wysiwyg-content pre .hljs-bullet,
+.markdown-wysiwyg-content pre .hljs-regexp,
+.markdown-wysiwyg-content pre .hljs-link {
+  color: var(--editor-token-number);
+}
+
+.markdown-wysiwyg-content pre .hljs-title,
+.markdown-wysiwyg-content pre .hljs-section,
+.markdown-wysiwyg-content pre .hljs-function .hljs-title {
+  color: var(--editor-token-title);
+}
+
+.markdown-wysiwyg-content pre .hljs-meta,
+.markdown-wysiwyg-content pre .hljs-doctag {
+  color: var(--editor-token-meta);
+}
+
+.markdown-wysiwyg-content pre .hljs-strong {
+  font-weight: 700;
+}
+
+.markdown-wysiwyg-content pre .hljs-emphasis {
+  font-style: italic;
+}
+
 .markdown-wysiwyg-content a {
-  color: color-mix(in oklch, var(--primary) 72%, var(--strong));
+  color: var(--editor-link);
   cursor: text;
   text-decoration: underline;
   text-decoration-thickness: 1px;
@@ -6559,7 +6665,7 @@ textarea:focus {
 }
 
 .markdown-wysiwyg-content th {
-  background: color-mix(in oklch, var(--primary) 8%, var(--surface));
+  background: color-mix(in oklch, var(--foreground) 5%, var(--surface));
   color: var(--strong);
   font-weight: 650;
   text-align: left;
@@ -8373,11 +8479,6 @@ textarea:focus {
 
   .markdown-wysiwyg-content {
     padding: 18px 16px 56px;
-  }
-
-  .markdown-wysiwyg-link-popover {
-    right: 0;
-    width: 100%;
   }
 
   .app-shell {

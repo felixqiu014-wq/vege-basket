@@ -21,6 +21,9 @@ historical product context; current code and these operational docs take precede
   request before the first write and roll back every partial failure.
 - Keep client contracts in `src/api.ts` and `src/types.ts` synchronized with server
   response shapes.
+- Keep document editors on the existing Markdown string contract. When registering
+  `CodeBlockLowlight`, disable StarterKit's plain code block, preserve fenced-language
+  metadata, and normalize link marks to HTTP or HTTPS before parsing or saving them.
 
 ## Security And Data Invariants
 
