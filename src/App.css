@@ -6134,7 +6134,7 @@ textarea:focus {
   --editor-highlight-text: #3d2b00;
   --editor-link: #175cd3;
   --editor-token-comment: #8fa69d;
-  --editor-token-keyword: #ff7b9c;
+  --editor-token-keyword: #b8c7c1;
   --editor-token-string: #8bd49c;
   --editor-token-number: #f2c96d;
   --editor-token-title: #82aaff;
@@ -6236,8 +6236,9 @@ textarea:focus {
 }
 
 .markdown-wysiwyg-tool.is-active {
-  background: color-mix(in oklch, var(--primary) 14%, var(--surface));
-  color: color-mix(in oklch, var(--primary) 76%, var(--strong));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, var(--line));
+  background: color-mix(in oklch, var(--foreground) 9%, var(--surface));
+  color: var(--strong);
 }
 
 .markdown-wysiwyg-tool:disabled {
@@ -6309,6 +6310,46 @@ textarea:focus {
 .markdown-wysiwyg-heading-menu {
   min-width: 136px;
   animation: none;
+}
+
+.markdown-wysiwyg-code-trigger {
+  width: 42px;
+  gap: 1px;
+}
+
+.markdown-wysiwyg-code-trigger-caret {
+  color: var(--muted-text);
+}
+
+.markdown-wysiwyg-code-menu {
+  width: 210px;
+  max-height: min(420px, calc(100dvh - 24px));
+  overflow-y: auto;
+}
+
+.markdown-wysiwyg-code-language-option[data-selected='true'] {
+  background: color-mix(in oklch, var(--foreground) 8%, var(--surface));
+  color: var(--strong);
+}
+
+.markdown-wysiwyg-code-language-option > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.markdown-wysiwyg-code-language-option > code {
+  background: transparent;
+  color: var(--muted-text);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.markdown-wysiwyg-code-language-check {
+  opacity: 0;
+}
+
+.markdown-wysiwyg-code-language-option[data-selected='true'] .markdown-wysiwyg-code-language-check {
+  opacity: 1;
 }
 
 .markdown-wysiwyg-link-popover {
@@ -8471,6 +8512,10 @@ textarea:focus {
   .markdown-wysiwyg-tool {
     width: 36px;
     height: 36px;
+  }
+
+  .markdown-wysiwyg-code-trigger {
+    width: 46px;
   }
 
   .markdown-wysiwyg-toolbar-separator {

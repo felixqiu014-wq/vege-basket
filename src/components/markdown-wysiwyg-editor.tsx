@@ -13,6 +13,7 @@ import {
   ArrowClockwise,
   ArrowCounterClockwise,
   CaretDown,
+  Check,
   Code,
   CodeBlock,
   ColumnsPlusRight,
@@ -27,6 +28,7 @@ import {
   TextB,
   TextItalic,
   TextStrikethrough,
+  TextT,
   Trash,
   X,
 } from '@phosphor-icons/react'
@@ -94,6 +96,116 @@ const MarkdownHighlight = Highlight.extend({
 })
 
 const syntaxHighlighter = createLowlight(common)
+syntaxHighlighter.highlightAuto = (source) => syntaxHighlighter.highlight('plaintext', source)
+
+type SyntaxLanguageOption = {
+  label: string
+  value: string
+}
+
+const syntaxLanguageLabels: Record<string, string> = {
+  arduino: 'Arduino',
+  bash: 'Bash',
+  c: 'C',
+  cpp: 'C++',
+  csharp: 'C#',
+  css: 'CSS',
+  diff: 'Diff',
+  go: 'Go',
+  graphql: 'GraphQL',
+  ini: 'INI',
+  java: 'Java',
+  javascript: 'JavaScript',
+  json: 'JSON',
+  kotlin: 'Kotlin',
+  less: 'Less',
+  lua: 'Lua',
+  makefile: 'Makefile',
+  markdown: 'Markdown',
+  objectivec: 'Objective-C',
+  perl: 'Perl',
+  php: 'PHP',
+  'php-template': 'PHP Template',
+  python: 'Python',
+  'python-repl': 'Python REPL',
+  r: 'R',
+  ruby: 'Ruby',
+  rust: 'Rust',
+  scss: 'SCSS',
+  shell: 'Shell',
+  sql: 'SQL',
+  swift: 'Swift',
+  typescript: 'TypeScript',
+  vbnet: 'VB.NET',
+  wasm: 'WebAssembly',
+  xml: 'HTML / XML',
+  yaml: 'YAML',
+}
+
+const preferredSyntaxLanguages = [
+  'javascript',
+  'typescript',
+  'json',
+  'bash',
+  'shell',
+  'yaml',
+  'xml',
+  'css',
+  'markdown',
+  'sql',
+  'go',
+  'python',
+]
+
+const registeredSyntaxLanguages = syntaxHighlighter
+  .listLanguages()
+  .filter((language) => language !== 'plaintext')
+const otherSyntaxLanguages = registeredSyntaxLanguages
+  .filter((language) => !preferredSyntaxLanguages.includes(language))
+  .sort((left, right) => left.localeCompare(right))
+const preferredSyntaxLanguageOptions: SyntaxLanguageOption[] = [
+  { label: '纯文本', value: '' },
+  ...preferredSyntaxLanguages.map((value) => ({
+    label: syntaxLanguageLabels[value] ?? value,
+    value,
+  })),
+]
+const otherSyntaxLanguageOptions: SyntaxLanguageOption[] = otherSyntaxLanguages.map((value) => ({
+  label: syntaxLanguageLabels[value] ?? value,
+  value,
+}))
+const syntaxLanguageAliases: Record<string, string> = {
+  'c#': 'csharp',
+  'c++': 'cpp',
+  cs: 'csharp',
+  html: 'xml',
+  js: 'javascript',
+  jsx: 'javascript',
+  md: 'markdown',
+  objc: 'objectivec',
+  plaintext: '',
+  py: 'python',
+  rb: 'ruby',
+  rs: 'rust',
+  sh: 'bash',
+  text: '',
+  ts: 'typescript',
+  tsx: 'typescript',
+  txt: '',
+  yml: 'yaml',
+  zsh: 'shell',
+}
+
+function normalizeSyntaxLanguage(value: string) {
+  const normalized = value.trim().toLowerCase()
+  return syntaxLanguageAliases[normalized] ?? normalized
+}
+
+function getSyntaxLanguageLabel(value: string) {
+  const normalized = normalizeSyntaxLanguage(value)
+  if (!normalized) return '纯文本'
+  return syntaxLanguageLabels[normalized] ?? normalized
+}
 
 const headingOptions: Array<{ label: string; value: 'paragraph' | HeadingLevel }> = [
   { label: '正文', value: 'paragraph' },
@@ -183,6 +295,7 @@ export function MarkdownWysiwygEditor({
         link: false,
       }),
       CodeBlockLowlight.configure({
+        defaultLanguage: 'plaintext',
         languageClassPrefix: 'language-',
         lowlight: syntaxHighlighter,
       }),
@@ -242,6 +355,7 @@ export function MarkdownWysiwygEditor({
       canUndo: currentEditor.can().chain().undo().run(),
       code: currentEditor.isActive('code'),
       codeBlock: currentEditor.isActive('codeBlock'),
+      codeBlockLanguage: String(currentEditor.getAttributes('codeBlock').language ?? ''),
       heading: ([1, 2, 3, 4, 5, 6] as HeadingLevel[]).find((level) =>
         currentEditor.isActive('heading', { level }),
       ),
@@ -280,6 +394,15 @@ export function MarkdownWysiwygEditor({
       return
     }
     editor.chain().focus().setHeading({ level: value }).run()
+  }
+
+  function setCodeBlockLanguage(language: string) {
+    if (editor.isActive('codeBlock')) {
+      editor.chain().focus().updateAttributes('codeBlock', { language: language || null }).run()
+      return
+    }
+
+    editor.chain().focus().setCodeBlock({ language }).run()
   }
 
   function prepareLinkEditor() {
@@ -328,6 +451,27 @@ export function MarkdownWysiwygEditor({
     : toolbarState.codeBlock
       ? '代码块'
       : '正文'
+  const currentCodeLanguage = normalizeSyntaxLanguage(toolbarState.codeBlockLanguage)
+  const currentCodeLanguageKnown =
+    currentCodeLanguage === '' || registeredSyntaxLanguages.includes(currentCodeLanguage)
+  const currentCodeLanguageLabel = getSyntaxLanguageLabel(toolbarState.codeBlockLanguage)
+
+  function renderSyntaxLanguageOption(option: SyntaxLanguageOption) {
+    const selected = toolbarState.codeBlock && currentCodeLanguage === option.value
+
+    return (
+      <DropdownMenuItem
+        key={option.value || 'plaintext'}
+        className="markdown-wysiwyg-code-language-option"
+        data-selected={selected}
+        onSelect={() => setCodeBlockLanguage(option.value)}
+      >
+        <Check className="markdown-wysiwyg-code-language-check" aria-hidden="true" />
+        <span>{option.label}</span>
+        <code>{option.value || 'plain'}</code>
+      </DropdownMenuItem>
+    )
+  }
 
   return (
     <div className="markdown-wysiwyg-editor">
@@ -479,13 +623,48 @@ export function MarkdownWysiwygEditor({
         >
           <Code size={17} />
         </ToolbarButton>
-        <ToolbarButton
-          label="代码块"
-          active={toolbarState.codeBlock}
-          onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-        >
-          <CodeBlock size={17} />
-        </ToolbarButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                'markdown-wysiwyg-tool markdown-wysiwyg-code-trigger',
+                toolbarState.codeBlock && 'is-active',
+              )}
+              aria-label={
+                toolbarState.codeBlock
+                  ? `代码块，当前语言：${currentCodeLanguageLabel}`
+                  : '插入代码块并选择语言'
+              }
+              aria-pressed={toolbarState.codeBlock}
+              data-tooltip={toolbarState.codeBlock ? currentCodeLanguageLabel : '代码块'}
+            >
+              <CodeBlock size={17} />
+              <CaretDown className="markdown-wysiwyg-code-trigger-caret" size={10} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="markdown-wysiwyg-code-menu">
+            {toolbarState.codeBlock && !currentCodeLanguageKnown ? (
+              <>
+                <DropdownMenuItem disabled>
+                  未知语言：{toolbarState.codeBlockLanguage}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
+            {preferredSyntaxLanguageOptions.map(renderSyntaxLanguageOption)}
+            <DropdownMenuSeparator />
+            {otherSyntaxLanguageOptions.map(renderSyntaxLanguageOption)}
+            {toolbarState.codeBlock ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => editor.chain().focus().toggleCodeBlock().run()}>
+                  <TextT /> 转为正文
+                </DropdownMenuItem>
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <ToolbarButton
           label="分隔线"
           onClick={() => editor.chain().focus().setHorizontalRule().run()}

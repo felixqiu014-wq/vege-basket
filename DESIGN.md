@@ -115,7 +115,7 @@ The palette combines neutral work surfaces with a green action signal. Light mod
 
 ### Editor Semantic Colors
 
-Editor color communicates meaning rather than decoration. Primary green is limited to selection, active, and focus states. Authored highlights use amber, links use blue, and blockquotes plus inline code use neutral tones. Syntax highlighting may use a controlled multicolor token palette, but it must remain scoped to code and preserve readable contrast in both themes.
+Editor color communicates meaning rather than decoration. Primary green is limited to document selection and focus states; active formatting controls use neutral gray. Authored highlights use amber, links use blue, and blockquotes plus inline code use neutral tones. Syntax highlighting may use a controlled multicolor token palette, but it must remain scoped to code, avoid pink as a dominant token color, and preserve readable contrast in both themes.
 
 ## Typography
 

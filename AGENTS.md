@@ -23,7 +23,8 @@ historical product context; current code and these operational docs take precede
   response shapes.
 - Keep document editors on the existing Markdown string contract. When registering
   `CodeBlockLowlight`, disable StarterKit's plain code block, preserve fenced-language
-  metadata, and normalize link marks to HTTP or HTTPS before parsing or saving them.
+  metadata, highlight only an explicit supported language, and normalize link marks to
+  HTTP or HTTPS before parsing or saving them.
 
 ## Security And Data Invariants
 
