@@ -6,6 +6,7 @@ import type {
   AiTurnRunResponse,
   JournalVisibility,
   PackageMarketChannel,
+  PackageMarketCiBranch,
   PackageMarketDetail,
   PackageMarketRule,
   PackageMarketVersion,
@@ -1160,6 +1161,7 @@ export function fetchPackageMarketBaseReleaseVersions(payload: {
 export function fetchPackageMarketDetail(payload: {
   arch: string
   channel: PackageMarketChannel
+  ciBranch?: string
   ciVersion?: string
   deployType?: string
   expireMinutes?: number
@@ -1170,6 +1172,7 @@ export function fetchPackageMarketDetail(payload: {
     arch: payload.arch,
     channel: payload.channel,
   })
+  if (payload.ciBranch) params.set('ciBranch', payload.ciBranch)
   if (payload.ciVersion) params.set('ciVersion', payload.ciVersion)
   if (payload.deployType) params.set('deployType', payload.deployType)
   if (payload.expireMinutes) params.set('expireMinutes', String(payload.expireMinutes))
@@ -1191,8 +1194,15 @@ export function fetchPackageMarketReleaseVersions(payload: {
   )
 }
 
-export function fetchPackageMarketCiVersions(payload: { arch: string; packageId: string }) {
+export function fetchPackageMarketCiBranches(payload: { packageId: string }) {
+  return request<{ branches: PackageMarketCiBranch[] }>(
+    `/api/package-market/packages/${encodeURIComponent(payload.packageId)}/ci-branches`,
+  )
+}
+
+export function fetchPackageMarketCiVersions(payload: { arch: string; ciBranch?: string; packageId: string }) {
   const params = new URLSearchParams({ arch: payload.arch })
+  if (payload.ciBranch) params.set('ciBranch', payload.ciBranch)
   return request<{ versions: PackageMarketVersion[] }>(
     `/api/package-market/packages/${encodeURIComponent(payload.packageId)}/ci-versions?${params.toString()}`,
   )

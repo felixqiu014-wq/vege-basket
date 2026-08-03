@@ -68,6 +68,7 @@ import {
 } from '@/components/package-event-filter'
 import type {
   PackageMarketChannel,
+  PackageMarketCiBranch,
   PackageMarketDetail,
   PackageMarketRule,
   PackageMarketVersion,
@@ -126,6 +127,7 @@ type PackageWorkbenchProps = {
   onLoadPackageMarketDetail: (payload: {
     arch: string
     channel: PackageMarketChannel
+    ciBranch?: string
     ciVersion?: string
     deployType?: 'pro' | 'oss'
     expireMinutes?: number
@@ -133,12 +135,14 @@ type PackageWorkbenchProps = {
     releaseVersion?: string
   }) => Promise<PackageMarketDetail>
   onLoadPackageItemDownloadUrl: (itemId: number) => Promise<string>
+  onLoadPackageMarketCiBranches: (packageId: string) => Promise<PackageMarketCiBranch[]>
   onLoadPackageMarketRules: () => Promise<{
     expireMinutes: number
     rules: PackageMarketRule[]
   }>
   onLoadPackageMarketVersions: (payload: {
     arch: string
+    ciBranch?: string
     kind: 'ci' | 'release'
     deployType?: 'pro' | 'oss'
     packageId: string
@@ -222,6 +226,7 @@ type PendingOperationTarget =
 type PackageMarketDetailContext = {
   arch: 'amd64' | 'arm64'
   channel: PackageMarketChannel
+  ciBranch: string
   ciVersion: string
   packageId: string
   releaseVersion: string
@@ -238,6 +243,7 @@ type PackageMarketDependencyState = {
 }
 
 type PackageMarketBrowserProps = {
+  onLoadPackageMarketCiBranches: PackageWorkbenchProps['onLoadPackageMarketCiBranches']
   onLoadPackageMarketDetail: PackageWorkbenchProps['onLoadPackageMarketDetail']
   onLoadPackageMarketRules: PackageWorkbenchProps['onLoadPackageMarketRules']
   onLoadPackageMarketVersions: PackageWorkbenchProps['onLoadPackageMarketVersions']
@@ -430,6 +436,7 @@ function getPackageMarketBaseRules(): PackageMarketRule[] {
 }
 
 export function PackageMarketBrowser({
+  onLoadPackageMarketCiBranches,
   onLoadPackageMarketDetail,
   onLoadPackageMarketRules,
   onLoadPackageMarketVersions,
@@ -442,7 +449,9 @@ export function PackageMarketBrowser({
   const [marketArch, setMarketArch] = useState<'amd64' | 'arm64'>('amd64')
   const [marketSearch, setMarketSearch] = useState('')
   const [marketReleaseVersion, setMarketReleaseVersion] = useState('')
+  const [marketCiBranch, setMarketCiBranch] = useState('')
   const [marketCiVersion, setMarketCiVersion] = useState('')
+  const [marketCiBranches, setMarketCiBranches] = useState<PackageMarketCiBranch[]>([])
   const [marketReleaseVersions, setMarketReleaseVersions] = useState<PackageMarketVersion[]>([])
   const [marketCiVersions, setMarketCiVersions] = useState<PackageMarketVersion[]>([])
   const [marketDetail, setMarketDetail] = useState<PackageMarketDetail | null>(null)
@@ -553,6 +562,7 @@ export function PackageMarketBrowser({
           context: {
             arch,
             channel: dependencyChannel,
+            ciBranch: '',
             ciVersion: dependencyChannel === 'ci' ? selectedVersion : '',
             packageId: rule.id,
             releaseVersion: dependencyChannel === 'release' ? selectedVersion : '',
@@ -584,6 +594,7 @@ export function PackageMarketBrowser({
   async function refreshMarketDetail(nextOverrides?: Partial<{
     arch: 'amd64' | 'arm64'
     channel: PackageMarketChannel
+    ciBranch: string
     ciVersion: string
     expireMinutes: number
     marketRules: PackageMarketRule[]
@@ -595,27 +606,37 @@ export function PackageMarketBrowser({
     const channel = nextOverrides?.channel ?? marketChannel
     const arch = nextOverrides?.arch ?? marketArch
     const releaseVersion = nextOverrides?.releaseVersion ?? marketReleaseVersion
+    const requestedCiBranch = nextOverrides?.ciBranch ?? marketCiBranch
     const ciVersion = nextOverrides?.ciVersion ?? marketCiVersion
     const expireMinutes = nextOverrides?.expireMinutes ?? marketExpireMinutes
     const rules = nextOverrides?.marketRules ?? marketRules
     const requestId = ++marketDetailRequestIdRef.current
-    const context: PackageMarketDetailContext = {
-      arch,
-      channel,
-      ciVersion,
-      packageId,
-      releaseVersion,
-    }
     setMarketLoading(true)
     setMarketError('')
     setMarketDetail(null)
     setMarketDetailContext(null)
     setMarketDependencyDetails([])
     try {
+      const ciBranches = channel === 'ci'
+        ? await onLoadPackageMarketCiBranches(packageId)
+        : []
+      if (requestId !== marketDetailRequestIdRef.current) return
+      const ciBranch = requestedCiBranch && ciBranches.some((item) => item.name === requestedCiBranch)
+        ? requestedCiBranch
+        : ciBranches[0]?.name ?? ''
+      const context: PackageMarketDetailContext = {
+        arch,
+        channel,
+        ciBranch,
+        ciVersion,
+        packageId,
+        releaseVersion,
+      }
       const [versions, detail] = await Promise.all([
         channel === 'ci'
           ? onLoadPackageMarketVersions({
               arch,
+              ciBranch,
               kind: 'ci',
               packageId,
             })
@@ -629,6 +650,7 @@ export function PackageMarketBrowser({
           packageId,
           channel,
           arch,
+          ciBranch,
           deployType:
             packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
           expireMinutes,
@@ -638,8 +660,12 @@ export function PackageMarketBrowser({
       ])
       if (requestId !== marketDetailRequestIdRef.current) return
       if (channel === 'ci') {
+        setMarketCiBranch(ciBranch)
+        setMarketCiBranches(ciBranches)
         setMarketCiVersions(versions)
       } else {
+        setMarketCiBranch('')
+        setMarketCiBranches([])
         setMarketReleaseVersions(versions)
       }
       setMarketDetail(detail)
@@ -808,11 +834,13 @@ export function PackageMarketBrowser({
                               setMarketSelectedPackage(rule.id)
                               setMarketChannel(nextChannel)
                               setMarketReleaseVersion('')
+                              setMarketCiBranch('')
                               setMarketCiVersion('')
                               void refreshMarketDetail({
                                 packageId: rule.id,
                                 channel: nextChannel,
                                 releaseVersion: '',
+                                ciBranch: '',
                                 ciVersion: '',
                               })
                             }}
@@ -837,9 +865,10 @@ export function PackageMarketBrowser({
                   onValueChange={(value) => {
                     const next = value as PackageMarketChannel
                     setMarketChannel(next)
+                    setMarketCiBranch('')
                     setMarketCiVersion('')
                     setMarketReleaseVersion('')
-                    void refreshMarketDetail({ channel: next, ciVersion: '', releaseVersion: '' })
+                    void refreshMarketDetail({ channel: next, ciBranch: '', ciVersion: '', releaseVersion: '' })
                   }}
                 >
                   <SelectTrigger>
@@ -860,9 +889,10 @@ export function PackageMarketBrowser({
                   onValueChange={(value) => {
                     const next = value as 'amd64' | 'arm64'
                     setMarketArch(next)
+                    setMarketCiBranch('')
                     setMarketCiVersion('')
                     setMarketReleaseVersion('')
-                    void refreshMarketDetail({ arch: next, ciVersion: '', releaseVersion: '' })
+                    void refreshMarketDetail({ arch: next, ciBranch: '', ciVersion: '', releaseVersion: '' })
                   }}
                 >
                   <SelectTrigger>
@@ -891,6 +921,30 @@ export function PackageMarketBrowser({
                       {marketReleaseVersions.map((version) => (
                         <SelectItem key={version.version ?? version.label} value={version.version ?? version.label}>
                           {version.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Label>
+              ) : null}
+              {marketChannel === 'ci' && marketCiBranches.length > 0 ? (
+                <Label className="package-market-version-control">
+                  CI 分支
+                  <Select
+                    value={marketCiBranch || marketCiBranches[0]?.name || ''}
+                    onValueChange={(value) => {
+                      setMarketCiBranch(value)
+                      setMarketCiVersion('')
+                      void refreshMarketDetail({ ciBranch: value, ciVersion: '' })
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择分支" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {marketCiBranches.map((branch) => (
+                        <SelectItem key={branch.name} value={branch.name}>
+                          {branch.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1149,6 +1203,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   onDeleteGroup,
   onDeleteOperation,
   onExportTimeline,
+  onLoadPackageMarketCiBranches,
   onLoadPackageMarketDetail,
   onLoadPackageItemDownloadUrl,
   onLoadPackageMarketRules,
@@ -1200,7 +1255,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [marketArch, setMarketArch] = useState<'amd64' | 'arm64'>('amd64')
   const [marketSearch, setMarketSearch] = useState('')
   const [marketReleaseVersion, setMarketReleaseVersion] = useState('')
+  const [marketCiBranch, setMarketCiBranch] = useState('')
   const [marketCiVersion, setMarketCiVersion] = useState('')
+  const [marketCiBranches, setMarketCiBranches] = useState<PackageMarketCiBranch[]>([])
   const [marketReleaseVersions, setMarketReleaseVersions] = useState<PackageMarketVersion[]>([])
   const [marketCiVersions, setMarketCiVersions] = useState<PackageMarketVersion[]>([])
   const [marketDetail, setMarketDetail] = useState<PackageMarketDetail | null>(null)
@@ -1586,6 +1643,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
           context: {
             arch,
             channel: dependencyChannel,
+            ciBranch: '',
             ciVersion: dependencyChannel === 'ci' ? selectedVersion : '',
             packageId: rule.id,
             releaseVersion: dependencyChannel === 'release' ? selectedVersion : '',
@@ -1617,6 +1675,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   async function refreshMarketDetail(nextOverrides?: Partial<{
     arch: 'amd64' | 'arm64'
     channel: PackageMarketChannel
+    ciBranch: string
     ciVersion: string
     expireMinutes: number
     marketRules: PackageMarketRule[]
@@ -1628,27 +1687,37 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     const channel = nextOverrides?.channel ?? marketChannel
     const arch = nextOverrides?.arch ?? marketArch
     const releaseVersion = nextOverrides?.releaseVersion ?? marketReleaseVersion
+    const requestedCiBranch = nextOverrides?.ciBranch ?? marketCiBranch
     const ciVersion = nextOverrides?.ciVersion ?? marketCiVersion
     const expireMinutes = nextOverrides?.expireMinutes ?? marketExpireMinutes
     const rules = nextOverrides?.marketRules ?? marketRules
     const requestId = ++marketDetailRequestIdRef.current
-    const context: PackageMarketDetailContext = {
-      arch,
-      channel,
-      ciVersion,
-      packageId,
-      releaseVersion,
-    }
     setMarketLoading(true)
     setMarketError('')
     setMarketDetail(null)
     setMarketDetailContext(null)
     setMarketDependencyDetails([])
     try {
+      const ciBranches = channel === 'ci'
+        ? await onLoadPackageMarketCiBranches(packageId)
+        : []
+      if (requestId !== marketDetailRequestIdRef.current) return
+      const ciBranch = requestedCiBranch && ciBranches.some((item) => item.name === requestedCiBranch)
+        ? requestedCiBranch
+        : ciBranches[0]?.name ?? ''
+      const context: PackageMarketDetailContext = {
+        arch,
+        channel,
+        ciBranch,
+        ciVersion,
+        packageId,
+        releaseVersion,
+      }
       const [versions, detail] = await Promise.all([
         channel === 'ci'
           ? onLoadPackageMarketVersions({
               arch,
+              ciBranch,
               kind: 'ci',
               packageId,
             })
@@ -1662,6 +1731,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
           packageId,
           channel,
           arch,
+          ciBranch,
           deployType:
             packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
           expireMinutes,
@@ -1671,8 +1741,12 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       ])
       if (requestId !== marketDetailRequestIdRef.current) return
       if (channel === 'ci') {
+        setMarketCiBranch(ciBranch)
+        setMarketCiBranches(ciBranches)
         setMarketCiVersions(versions)
       } else {
+        setMarketCiBranch('')
+        setMarketCiBranches([])
         setMarketReleaseVersions(versions)
       }
       setMarketDetail(detail)
@@ -2996,11 +3070,13 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                                 setMarketSelectedPackage(rule.id)
                                 setMarketChannel(nextChannel)
                                 setMarketReleaseVersion('')
+                                setMarketCiBranch('')
                                 setMarketCiVersion('')
                                 void refreshMarketDetail({
                                   packageId: rule.id,
                                   channel: nextChannel,
                                   releaseVersion: '',
+                                  ciBranch: '',
                                   ciVersion: '',
                                 })
                               }}
@@ -3025,9 +3101,10 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                     onValueChange={(value) => {
                       const next = value as PackageMarketChannel
                       setMarketChannel(next)
+                      setMarketCiBranch('')
                       setMarketCiVersion('')
                       setMarketReleaseVersion('')
-                      void refreshMarketDetail({ channel: next, ciVersion: '', releaseVersion: '' })
+                      void refreshMarketDetail({ channel: next, ciBranch: '', ciVersion: '', releaseVersion: '' })
                     }}
                   >
                     <SelectTrigger>
@@ -3048,9 +3125,10 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                     onValueChange={(value) => {
                       const next = value as 'amd64' | 'arm64'
                       setMarketArch(next)
+                      setMarketCiBranch('')
                       setMarketCiVersion('')
                       setMarketReleaseVersion('')
-                      void refreshMarketDetail({ arch: next, ciVersion: '', releaseVersion: '' })
+                      void refreshMarketDetail({ arch: next, ciBranch: '', ciVersion: '', releaseVersion: '' })
                     }}
                   >
                     <SelectTrigger>
@@ -3079,6 +3157,30 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                         {marketReleaseVersions.map((version) => (
                           <SelectItem key={version.version ?? version.label} value={version.version ?? version.label}>
                             {version.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Label>
+                ) : null}
+                {marketChannel === 'ci' && marketCiBranches.length > 0 ? (
+                  <Label className="package-market-version-control">
+                    CI 分支
+                    <Select
+                      value={marketCiBranch || marketCiBranches[0]?.name || ''}
+                      onValueChange={(value) => {
+                        setMarketCiBranch(value)
+                        setMarketCiVersion('')
+                        void refreshMarketDetail({ ciBranch: value, ciVersion: '' })
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择分支" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {marketCiBranches.map((branch) => (
+                          <SelectItem key={branch.name} value={branch.name}>
+                            {branch.label}
                           </SelectItem>
                         ))}
                       </SelectContent>

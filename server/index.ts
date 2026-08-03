@@ -62,6 +62,7 @@ import {
   getPackageMarketDetail,
   getPackageMarketExpireMinutes,
   isAllowedPackageMarketObjectKey,
+  listPackageMarketCiBranches,
   listPackageMarketCiVersions,
   listPackageMarketReleaseVersions,
   listPackageMarketRules,
@@ -8818,10 +8819,21 @@ app.get('/api/package-market/packages/:packageId', asyncHandler(async (request, 
     deployType: String(request.query.deployType ?? ''),
     arch: String(request.query.arch ?? 'amd64'),
     channel: ensurePackageMarketChannel(request.query.channel),
+    ciBranch: String(request.query.ciBranch ?? ''),
     ciVersion: String(request.query.ciVersion ?? ''),
     expireMinutes: ensurePackageMarketExpireMinutes(request.query.expireMinutes),
     releaseVersion: String(request.query.releaseVersion ?? ''),
   }))
+}))
+
+app.get('/api/package-market/packages/:packageId/ci-branches', asyncHandler(async (request, response) => {
+  const userId = await ensureUserId(request, response)
+  if (!userId) return
+  response.json({
+    branches: await listPackageMarketCiBranches({
+      packageId: String(request.params.packageId),
+    }),
+  })
 }))
 
 app.get('/api/package-market/packages/:packageId/ci-versions', asyncHandler(async (request, response) => {
@@ -8831,6 +8843,7 @@ app.get('/api/package-market/packages/:packageId/ci-versions', asyncHandler(asyn
     versions: await listPackageMarketCiVersions({
       packageId: String(request.params.packageId),
       arch: String(request.query.arch ?? 'amd64'),
+      ciBranch: String(request.query.ciBranch ?? ''),
     }),
   })
 }))

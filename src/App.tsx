@@ -128,6 +128,7 @@ import {
   exportProjectPackageTimeline,
   fetchPackageMarketBaseDetail,
   fetchPackageMarketBaseReleaseVersions,
+  fetchPackageMarketCiBranches,
   fetchPackageMarketCiVersions,
   fetchPackageMarketDetail,
   fetchPackageMarketReleaseVersions,
@@ -195,6 +196,7 @@ import type {
   InboxItem,
   JournalVisibility,
   PackageMarketChannel,
+  PackageMarketCiBranch,
   PackageMarketDetail,
   PackageMarketRule,
   PackageMarketVersion,
@@ -3115,6 +3117,7 @@ function App() {
   async function loadPackageMarketDetail(payload: {
     arch: string
     channel: PackageMarketChannel
+    ciBranch?: string
     ciVersion?: string
     deployType?: 'pro' | 'oss'
     expireMinutes?: number
@@ -3134,8 +3137,13 @@ function App() {
     return fetchPackageMarketDetail(payload)
   }
 
+  async function loadPackageMarketCiBranches(packageId: string): Promise<PackageMarketCiBranch[]> {
+    return (await fetchPackageMarketCiBranches({ packageId })).branches
+  }
+
   async function loadPackageMarketVersions(payload: {
     arch: string
+    ciBranch?: string
     kind: 'ci' | 'release'
     deployType?: 'pro' | 'oss'
     packageId: string
@@ -3143,6 +3151,7 @@ function App() {
     if (payload.kind === 'ci') {
       return (await fetchPackageMarketCiVersions({
         arch: payload.arch,
+        ciBranch: payload.ciBranch,
         packageId: payload.packageId,
       })).versions
     }
@@ -4371,6 +4380,7 @@ ${packageTimelineText}`
             onExportInstallTimeline={exportInstallTimeline}
             onInstallLoadMarketDetail={loadPackageMarketDetail}
             onInstallLoadItemDownloadUrl={loadInstallItemDownloadUrl}
+            onInstallLoadMarketCiBranches={loadPackageMarketCiBranches}
             onInstallLoadMarketRules={loadPackageMarketRules}
             onInstallLoadMarketVersions={loadPackageMarketVersions}
             onInstallSelectPackages={addInstallItems}
@@ -4488,6 +4498,7 @@ ${packageTimelineText}`
 
         {view === 'package_market' ? (
           <PackageMarketBrowser
+            onLoadPackageMarketCiBranches={loadPackageMarketCiBranches}
             onLoadPackageMarketDetail={loadPackageMarketDetail}
             onLoadPackageMarketRules={loadPackageMarketRules}
             onLoadPackageMarketVersions={loadPackageMarketVersions}
@@ -5071,6 +5082,7 @@ function ProjectDetail({
   onDeleteInstallOperation,
   onDraftChange,
   onExportInstallTimeline,
+  onInstallLoadMarketCiBranches,
   onInstallLoadMarketDetail,
   onInstallLoadItemDownloadUrl,
   onInstallLoadMarketRules,
@@ -5148,18 +5160,21 @@ function ProjectDetail({
   onInstallLoadMarketDetail: (payload: {
     arch: string
     channel: PackageMarketChannel
+    ciBranch?: string
     ciVersion?: string
     deployType?: 'pro' | 'oss'
     packageId: string
     releaseVersion?: string
   }) => Promise<PackageMarketDetail>
   onInstallLoadItemDownloadUrl: (itemId: number) => Promise<string>
+  onInstallLoadMarketCiBranches: (packageId: string) => Promise<PackageMarketCiBranch[]>
   onInstallLoadMarketRules: () => Promise<{
     expireMinutes: number
     rules: PackageMarketRule[]
   }>
   onInstallLoadMarketVersions: (payload: {
     arch: string
+    ciBranch?: string
     kind: 'ci' | 'release'
     deployType?: 'pro' | 'oss'
     packageId: string
@@ -5384,6 +5399,7 @@ function ProjectDetail({
             onDeleteOperation={onDeleteInstallOperation}
             onExportTimeline={onExportInstallTimeline}
             onLoadPackageMarketDetail={onInstallLoadMarketDetail}
+            onLoadPackageMarketCiBranches={onInstallLoadMarketCiBranches}
             onLoadPackageItemDownloadUrl={onInstallLoadItemDownloadUrl}
             onLoadPackageMarketRules={onInstallLoadMarketRules}
             onLoadPackageMarketVersions={onInstallLoadMarketVersions}

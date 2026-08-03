@@ -39,6 +39,11 @@ export type PackageMarketVersion = {
   version?: string
 }
 
+export type PackageMarketCiBranch = {
+  label: string
+  name: string
+}
+
 export type PackageMarketDetail = {
   ciVersions?: PackageMarketVersion[]
   links: PackageMarketLink[]
@@ -357,11 +362,17 @@ function ruleAllowsObjectKey(rule: PackageMarketRule, objectKey: string) {
     }
   }
 
-  for (const root of ciRootsForRule(rule)) {
+  for (const root of ciBaseRootsForRule(rule)) {
     if (!objectKey.startsWith(root)) continue
-    const [hash, fileName, ...extra] = objectKey.slice(root.length).split('/')
+    const [branch, hash, fileName, ...extra] = objectKey.slice(root.length).split('/')
     const formats = rule.ciFileNameFormats.length > 0 ? rule.ciFileNameFormats : rule.fileNameFormats
-    if (hash && fileName && extra.length === 0 && fileNameMatchesFormats(fileName, formats, hash)) {
+    if (
+      isValidCiBranch(branch) &&
+      hash &&
+      fileName &&
+      extra.length === 0 &&
+      fileNameMatchesFormats(fileName, formats, hash)
+    ) {
       return true
     }
   }
@@ -722,16 +733,52 @@ function releaseVersionFromObject(root: string, objectKey: string) {
   return parts.length > 1 ? normalizeVersion(parts[0]) : ''
 }
 
-function ciRootsForRule(rule: PackageMarketRule) {
+function ciBaseRootsForRule(rule: PackageMarketRule) {
   const roots = new Set<string>()
   for (const root of rule.releaseRoots) {
     const normalized = root.replace(/\/+$/, '/')
     const match = normalized.match(/^(.*)\/releases?\/$/)
     if (match) {
-      roots.add(`${match[1]}/ci/main/`)
+      roots.add(`${match[1]}/ci/`)
     }
   }
   return [...roots]
+}
+
+function isValidCiBranch(value: string) {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value) && value !== '.' && value !== '..'
+}
+
+function compareCiBranches(left: string, right: string) {
+  if (left === 'main') return right === 'main' ? 0 : -1
+  if (right === 'main') return 1
+  return left.localeCompare(right)
+}
+
+async function listCiBranches(client: OSS, rule: PackageMarketRule): Promise<PackageMarketCiBranch[]> {
+  const branches = new Set<string>()
+  for (const root of ciBaseRootsForRule(rule)) {
+    const prefixes = await listCommonPrefixes(client, root)
+    for (const prefix of prefixes) {
+      const branch = prefix.slice(root.length).replace(/\/$/, '')
+      if (isValidCiBranch(branch) && !branch.includes('/')) branches.add(branch)
+    }
+  }
+  return [...branches]
+    .sort(compareCiBranches)
+    .map((name) => ({ label: name, name }))
+}
+
+async function resolveCiRoots(client: OSS, rule: PackageMarketRule, requestedBranch: string) {
+  const branches = await listCiBranches(client, rule)
+  const branch = normalizeString(requestedBranch) || branches[0]?.name || ''
+  if (!branch || !branches.some((item) => item.name === branch)) {
+    throw new Error(`unknown CI branch: ${branch || '(empty)'}`)
+  }
+  return {
+    branch,
+    roots: ciBaseRootsForRule(rule).map((root) => `${root}${branch}/`),
+  }
 }
 
 function ciHashFromObject(root: string, objectKey: string) {
@@ -1112,10 +1159,10 @@ async function listReleaseVersions(
     }))
 }
 
-async function listCiVersions(client: OSS, rule: PackageMarketRule, arch: string) {
+async function listCiVersionsFromRoots(client: OSS, rule: PackageMarketRule, arch: string, roots: string[]) {
   const versions = new Map<string, { hash: string; object: OssObject }>()
 
-  for (const root of ciRootsForRule(rule)) {
+  for (const root of roots) {
     const objects = await listAllObjects(client, root)
     for (const object of objects) {
       const hash = ciHashFromObject(root, object.name)
@@ -1138,19 +1185,26 @@ async function listCiVersions(client: OSS, rule: PackageMarketRule, arch: string
     }))
 }
 
+async function listCiVersions(client: OSS, rule: PackageMarketRule, arch: string, ciBranch: string) {
+  const { roots } = await resolveCiRoots(client, rule, ciBranch)
+  return listCiVersionsFromRoots(client, rule, arch, roots)
+}
+
 async function buildCiPackage(
   client: OSS,
   rule: PackageMarketRule,
   arch: string,
+  requestedBranch: string,
   requestedHash: string,
   expireSeconds = downloadExpireSeconds,
 ): Promise<PackageMarketDetail> {
-  const versions = await listCiVersions(client, rule, arch)
+  const { branch, roots } = await resolveCiRoots(client, rule, requestedBranch)
+  const versions = await listCiVersionsFromRoots(client, rule, arch, roots)
   const hash = normalizeString(requestedHash) || versions[0]?.hash || ''
   const matched: OssObject[] = []
 
   if (hash) {
-    for (const root of ciRootsForRule(rule)) {
+    for (const root of roots) {
       const objects = await listAllObjects(client, `${root}${hash}/`)
       for (const object of objects) {
         const fileName = object.name.slice(`${root}${hash}/`.length)
@@ -1167,6 +1221,7 @@ async function buildCiPackage(
     type: 'ci package',
     meta: [
       { label: '规则 key', value: rule.id },
+      { label: 'CI 分支', value: branch },
       { label: '测试版本', value: selected?.label || '未找到' },
       { label: '下载有效期', value: `${Math.round(expireSeconds / 60)} 分钟` },
     ],
@@ -1181,6 +1236,7 @@ async function buildComboPackage(
   arch: string,
   releaseVersion: string,
   channel: 'release' | 'ci',
+  ciBranch: string,
   ciVersion: string,
   expireSeconds = downloadExpireSeconds,
 ): Promise<PackageMarketDetail> {
@@ -1188,7 +1244,7 @@ async function buildComboPackage(
     if (rule.category === 'dependency' && rule.dependencyRoots.length > 0) {
       return buildDependencyPackage(client, rule, arch, ciVersion, expireSeconds)
     }
-    return buildCiPackage(client, rule, arch, ciVersion, expireSeconds)
+    return buildCiPackage(client, rule, arch, ciBranch, ciVersion, expireSeconds)
   }
 
   const matched: Array<{ object: OssObject; version: string }> = []
@@ -1263,6 +1319,7 @@ export async function listPackageMarketRules() {
 export async function getPackageMarketDetail(params: {
   arch: string
   channel: 'release' | 'ci'
+  ciBranch?: string
   ciVersion?: string
   deployType?: string
   expireMinutes?: number
@@ -1301,6 +1358,7 @@ export async function getPackageMarketDetail(params: {
     arch,
     params.releaseVersion || '',
     params.channel,
+    params.ciBranch || '',
     params.ciVersion || '',
     expireSeconds,
   )
@@ -1339,6 +1397,7 @@ export async function listPackageMarketReleaseVersions(params: {
 
 export async function listPackageMarketCiVersions(params: {
   arch: string
+  ciBranch?: string
   packageId: string
 }) {
   const client = ossClient()
@@ -1355,7 +1414,16 @@ export async function listPackageMarketCiVersions(params: {
   if (rule.category === 'dependency' && rule.dependencyRoots.length > 0) {
     return listDependencyVersions(client, rule, arch)
   }
-  return listCiVersions(client, rule, arch)
+  return listCiVersions(client, rule, arch, params.ciBranch || '')
+}
+
+export async function listPackageMarketCiBranches(params: { packageId: string }) {
+  const client = ossClient()
+  if (proMiddlewareNameFromId(params.packageId)) return []
+  const rule = parseRulesFile().find((item) => item.id === params.packageId)
+  if (!rule) throw new Error(`unknown package: ${params.packageId}`)
+  if (rule.category === 'dependency') return []
+  return listCiBranches(client, rule)
 }
 
 export function createPackageItemDownloadUrl(objectKey: string, expireMinutes?: number) {

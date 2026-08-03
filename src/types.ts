@@ -302,6 +302,11 @@ export type PackageMarketVersion = {
   lastModified?: string
 }
 
+export type PackageMarketCiBranch = {
+  label: string
+  name: string
+}
+
 export type PackageMarketLink = {
   name: string
   version: string

@@ -16,11 +16,15 @@ rules:
     file_name_formats:
       - admin-cluster-%s-%s.tar
       - admin-cluster-%s-%s.tar.gz
+      - admin-v2-cluster-%s-%s.tar
+      - admin-v2-cluster-%s-%s.tar.gz
     ci_file_name_formats:
       - admin-cluster-latest-%s-%s.tar
       - admin-cluster-latest-%s-%s.tar.gz
       - sealos-admin-cluster-latest-%s-%s.tar
       - sealos-admin-cluster-latest-%s-%s.tar.gz
+      - admin-v2-cluster-latest-%s-%s.tar
+      - admin-v2-cluster-latest-%s-%s.tar.gz
   devbox-cache:
     name: devbox-cache
     flat_file_roots:

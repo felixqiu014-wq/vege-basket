@@ -96,6 +96,27 @@ test('allows offline-center release package objects from bundled rules', () => {
   )
 })
 
+test('allows configured package objects under dynamically named CI branches', () => {
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/sealos-apps/admin/ci/v2/a6e0651/admin-v2-cluster-latest-a6e0651-amd64.tar',
+    ),
+    true,
+  )
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/sealos-apps/admin/ci/feature/nested/a6e0651/admin-v2-cluster-latest-a6e0651-amd64.tar',
+    ),
+    false,
+  )
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/sealos-apps/admin/ci/v2/a6e0651/unconfigured-a6e0651-amd64.tar',
+    ),
+    false,
+  )
+})
+
 test('returns bundled package market rules without OSS credentials', async () => {
   const keys = ['OSS_ENDPOINT', 'OSS_ACCESS_KEY_ID', 'OSS_ACCESS_KEY_SECRET', 'OSS_BUCKET']
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
