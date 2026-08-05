@@ -1,8 +1,10 @@
 // 提供用户隔离的 GitHub 镜像同步任务 API，并封装固定目标的 GitHub Actions 请求。
+import OSS from 'ali-oss'
 import { Router } from 'express'
 import type { PoolClient } from 'pg'
 import { decryptText, encryptText } from './crypto.ts'
 import { pool, query } from './db.ts'
+import { normalizeOssEndpoint } from './package-market.ts'
 import { getAuthenticatedRoleSession } from './roles.ts'
 
 export const imageSyncArchitectures = ['amd64', 'arm64'] as const
@@ -78,6 +80,8 @@ const githubWorkflow = 'sync-images-tar-oss.yml'
 const githubRef = 'main'
 const githubApiRoot = `https://api.github.com/repos/${githubOwner}/${githubRepo}`
 const activeStatuses: readonly ImageSyncRunStatus[] = ['dispatching', 'queued', 'in_progress']
+const defaultImageSyncDownloadExpireSeconds = 30 * 60
+const maxImageSyncDownloadExpireSeconds = 7 * 24 * 60 * 60
 
 export class ImageSyncWorkflowError extends Error {
   code: string
@@ -254,6 +258,65 @@ export function buildImageSyncArtifactUris(input: {
   return { md5Uri: `${tarUri}.md5`, tarUri }
 }
 
+export function getImageSyncDownloadExpireSeconds(value: unknown = process.env.IMAGE_SYNC_DOWNLOAD_EXPIRE_SECONDS) {
+  const configured = String(value ?? '').trim()
+  if (!configured) return defaultImageSyncDownloadExpireSeconds
+  if (!/^\d+$/.test(configured)) {
+    throw new ImageSyncWorkflowError(
+      'IMAGE_SYNC_DOWNLOAD_CONFIG_INVALID',
+      '镜像同步下载地址有效期配置无效。',
+      500,
+    )
+  }
+  const seconds = Number(configured)
+  if (!Number.isSafeInteger(seconds) || seconds < 1 || seconds > maxImageSyncDownloadExpireSeconds) {
+    throw new ImageSyncWorkflowError(
+      'IMAGE_SYNC_DOWNLOAD_CONFIG_INVALID',
+      '镜像同步下载地址有效期配置无效。',
+      500,
+    )
+  }
+  return seconds
+}
+
+export function buildImageSyncTarObjectKey(input: {
+  arch: ImageSyncArchitecture
+  bucket: unknown
+  image: string
+  runCreatedAt: string
+}) {
+  const bucket = normalizeOssBucket(input.bucket)
+  const artifacts = buildImageSyncArtifactUris(input)
+  if (!bucket || !artifacts) return null
+  const prefix = `oss://${bucket}/`
+  if (!artifacts.tarUri.startsWith(prefix)) return null
+  const objectKey = artifacts.tarUri.slice(prefix.length)
+  return /^temp\/\d{4}\/\d{2}\/\d{2}\/[a-z0-9]+(?:-[a-z0-9]+)*-(?:amd64|arm64)\.tar$/.test(objectKey)
+    ? objectKey
+    : null
+}
+
+function imageSyncOssClient() {
+  const endpoint = normalizeOssEndpoint(process.env.OSS_ENDPOINT)
+  const accessKeyId = String(process.env.OSS_ACCESS_KEY_ID ?? '').trim()
+  const accessKeySecret = String(process.env.OSS_ACCESS_KEY_SECRET ?? '').trim()
+  const bucket = normalizeOssBucket(process.env.OSS_BUCKET)
+  if (!endpoint || !accessKeyId || !accessKeySecret || !bucket) {
+    throw new ImageSyncWorkflowError(
+      'OSS_DOWNLOAD_UNAVAILABLE',
+      '下载地址暂时不可用，请稍后重试。',
+      503,
+    )
+  }
+  return new OSS({
+    accessKeyId,
+    accessKeySecret,
+    bucket,
+    endpoint,
+    secure: true,
+  })
+}
+
 function readGitHubToken() {
   const token = String(process.env.GITHUB_ACTIONS_TOKEN ?? '').trim()
   if (!token) {
@@ -423,6 +486,45 @@ function serializeRun(row: ImageSyncRunRow) {
     lastSyncedAt: row.last_synced_at,
     status: row.status,
     updatedAt: row.updated_at,
+  }
+}
+
+function createImageSyncDownloadLink(row: ImageSyncRunRow) {
+  if (classifyImageSyncRun(row.status, row.conclusion) !== 'success') {
+    throw new ImageSyncWorkflowError(
+      'IMAGE_SYNC_ARTIFACT_UNAVAILABLE',
+      '该任务尚未生成可下载的镜像归档。',
+      409,
+    )
+  }
+  const storedProgress = parseProgress(row.progress)
+  const objectKey = buildImageSyncTarObjectKey({
+    arch: row.architecture,
+    bucket: process.env.OSS_BUCKET,
+    image: decryptText(row.image_ref_encrypted),
+    runCreatedAt: storedProgress.runCreatedAt ?? row.created_at,
+  })
+  if (!objectKey) {
+    throw new ImageSyncWorkflowError(
+      'IMAGE_SYNC_ARTIFACT_UNAVAILABLE',
+      '该任务尚未生成可下载的镜像归档。',
+      409,
+    )
+  }
+  const expiresInSeconds = getImageSyncDownloadExpireSeconds()
+  try {
+    return {
+      downloadUrl: imageSyncOssClient().signatureUrl(objectKey, { expires: expiresInSeconds, method: 'GET' }),
+      expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
+      expiresInSeconds,
+    }
+  } catch (error) {
+    if (error instanceof ImageSyncWorkflowError) throw error
+    throw new ImageSyncWorkflowError(
+      'OSS_DOWNLOAD_UNAVAILABLE',
+      '下载地址暂时不可用，请稍后重试。',
+      503,
+    )
   }
 }
 
@@ -613,6 +715,33 @@ imageSyncWorkflowRouter.delete('/image-sync-runs/:runId', async (request, respon
     }
     response.status(409).json({ error: '只能清理已失败任务的本地记录。' })
   } catch (error) {
+    next(error)
+  }
+})
+
+imageSyncWorkflowRouter.get('/image-sync-runs/:runId/download-url', async (request, response, next) => {
+  try {
+    const session = await getAuthenticatedRoleSession(request)
+    if (!session) {
+      response.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const runId = positiveInteger(request.params.runId)
+    if (runId == null) {
+      response.status(404).json({ error: '镜像同步任务不存在。' })
+      return
+    }
+    const row = await findOwnedRun(session.userId, runId)
+    if (!row) {
+      response.status(404).json({ error: '镜像同步任务不存在。' })
+      return
+    }
+    response.json(createImageSyncDownloadLink(row))
+  } catch (error) {
+    if (error instanceof ImageSyncWorkflowError) {
+      response.status(error.status).json({ code: error.code, error: error.message })
+      return
+    }
     next(error)
   }
 })

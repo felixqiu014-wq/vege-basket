@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   buildImageSyncArtifactUris,
+  buildImageSyncTarObjectKey,
   classifyImageSyncRun,
+  getImageSyncDownloadExpireSeconds,
   ImageSyncWorkflowError,
   isImageSyncRunTerminal,
   mapGitHubRunStatus,
@@ -124,6 +126,40 @@ test('builds workflow-compatible OSS artifact URIs from the UTC run date', () =>
     image: 'nginx:latest',
     runCreatedAt: 'invalid',
   }), null)
+})
+
+test('derives only the fixed tar object key for image sync downloads', () => {
+  assert.equal(buildImageSyncTarObjectKey({
+    arch: 'amd64',
+    bucket: 'veges-artifacts',
+    image: 'docker.io/library/nginx:1.27',
+    runCreatedAt: '2026-08-04T01:02:03Z',
+  }), 'temp/2026/08/04/docker-io-library-nginx-1-27-amd64.tar')
+  assert.equal(buildImageSyncTarObjectKey({
+    arch: 'amd64',
+    bucket: 'invalid_bucket',
+    image: 'docker.io/library/nginx:1.27',
+    runCreatedAt: '2026-08-04T01:02:03Z',
+  }), null)
+})
+
+test('uses a 30-minute download expiry by default and rejects unsafe configuration', () => {
+  assert.equal(getImageSyncDownloadExpireSeconds(''), 30 * 60)
+  assert.equal(getImageSyncDownloadExpireSeconds('3600'), 3600)
+  for (const value of ['0', '-1', '1.5', '604801', 'invalid']) {
+    assert.throws(
+      () => getImageSyncDownloadExpireSeconds(value),
+      (error) => error instanceof ImageSyncWorkflowError && error.code === 'IMAGE_SYNC_DOWNLOAD_CONFIG_INVALID',
+    )
+  }
+})
+
+test('download route remains owner-scoped and derives the tar key server-side', () => {
+  const source = readFileSync(new URL('./image-sync-workflows.ts', import.meta.url), 'utf8')
+  const route = source.slice(source.indexOf("imageSyncWorkflowRouter.get('/image-sync-runs/:runId/download-url'"))
+  assert.match(route, /findOwnedRun\(session\.userId, runId\)/)
+  assert.match(route, /createImageSyncDownloadLink\(row\)/)
+  assert.doesNotMatch(route, /request\.(?:body|query).*objectKey/)
 })
 
 test('failed-run cleanup is owner-scoped and never calls GitHub or OSS deletion', () => {

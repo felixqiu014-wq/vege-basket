@@ -43,6 +43,12 @@ export type ImageSyncRun = {
   updatedAt: string
 }
 
+export type ImageSyncDownloadLink = {
+  downloadUrl: string
+  expiresAt: string
+  expiresInSeconds: number
+}
+
 export type JournalEntry = {
   id: number
   createdAt: string

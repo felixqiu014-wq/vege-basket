@@ -5,6 +5,7 @@ import type {
   AiTurnPage,
   AiTurnRunResponse,
   ImageSyncArchitecture,
+  ImageSyncDownloadLink,
   ImageSyncRun,
   JournalVisibility,
   PackageMarketChannel,
@@ -364,6 +365,10 @@ export function fetchImageSyncRuns() {
 export function fetchImageSyncRun(runId: number, refresh = false) {
   const params = refresh ? '?refresh=true' : ''
   return request<{ run: ImageSyncRun }>(`/api/image-sync-runs/${runId}${params}`)
+}
+
+export function fetchImageSyncRunDownloadUrl(runId: number) {
+  return request<ImageSyncDownloadLink>(`/api/image-sync-runs/${runId}/download-url`)
 }
 
 export function deleteImageSyncRun(runId: number) {

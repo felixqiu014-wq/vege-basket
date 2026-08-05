@@ -15,6 +15,7 @@ import {
   createImageSyncRun,
   deleteImageSyncRun,
   fetchImageSyncRun,
+  fetchImageSyncRunDownloadUrl,
   fetchImageSyncRuns,
 } from '@/api'
 import type {
@@ -109,6 +110,7 @@ export function ImageSyncWorkbench() {
   const [arch, setArch] = useState<ImageSyncArchitecture>('amd64')
   const [busy, setBusy] = useState(false)
   const [copiedUri, setCopiedUri] = useState('')
+  const [downloadCopyRunId, setDownloadCopyRunId] = useState<number | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteRun, setDeleteRun] = useState<ImageSyncRun | null>(null)
   const [error, setError] = useState('')
@@ -215,6 +217,22 @@ export function ImageSyncWorkbench() {
       window.setTimeout(() => setCopiedUri((current) => current === uri ? '' : current), 1_500)
     } catch {
       setError('复制失败，请手动选择对象存储地址。')
+    }
+  }
+
+  async function copyDownloadUrl(runId: number) {
+    setDownloadCopyRunId(runId)
+    setError('')
+    try {
+      const { downloadUrl } = await fetchImageSyncRunDownloadUrl(runId)
+      await navigator.clipboard.writeText(downloadUrl)
+      const copiedKey = `download-${runId}`
+      setCopiedUri(copiedKey)
+      window.setTimeout(() => setCopiedUri((current) => current === copiedKey ? '' : current), 1_500)
+    } catch (copyError) {
+      setError(errorMessage(copyError, '下载地址复制失败，请稍后重试。'))
+    } finally {
+      setDownloadCopyRunId(null)
     }
   }
 
@@ -371,16 +389,32 @@ export function ImageSyncWorkbench() {
                     <div key={label}>
                       <span>{label}</span>
                       <code title={uri}>{uri}</code>
-                      <Button
-                        aria-label={`复制${label}地址`}
-                        size="icon"
-                        title={`复制${label}地址`}
-                        type="button"
-                        variant="ghost"
-                        onClick={() => void copyArtifact(uri)}
-                      >
-                        {copiedUri === uri ? <CheckCircle weight="fill" /> : <CopySimple />}
-                      </Button>
+                      {label === '镜像归档' ? (
+                        <Button
+                          aria-label={copiedUri === `download-${selectedRun.id}` ? '已复制下载地址' : '复制下载地址'}
+                          disabled={downloadCopyRunId === selectedRun.id}
+                          size="icon"
+                          title="复制下载地址"
+                          type="button"
+                          variant="ghost"
+                          onClick={() => void copyDownloadUrl(selectedRun.id)}
+                        >
+                          {downloadCopyRunId === selectedRun.id
+                            ? <SpinnerGap className="image-sync-spin" />
+                            : copiedUri === `download-${selectedRun.id}` ? <CheckCircle weight="fill" /> : <CopySimple />}
+                        </Button>
+                      ) : (
+                        <Button
+                          aria-label={`复制${label}地址`}
+                          size="icon"
+                          title={`复制${label}地址`}
+                          type="button"
+                          variant="ghost"
+                          onClick={() => void copyArtifact(uri)}
+                        >
+                          {copiedUri === uri ? <CheckCircle weight="fill" /> : <CopySimple />}
+                        </Button>
+                      )}
                     </div>
                   ))}
                 </section>
