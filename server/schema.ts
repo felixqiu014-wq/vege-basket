@@ -39,6 +39,7 @@ create table if not exists user_roles (
 create table if not exists image_sync_workflow_runs (
   id bigserial primary key,
   user_id bigint not null references users(id) on delete cascade,
+  dispatch_key uuid not null default gen_random_uuid(),
   image_ref_encrypted text not null,
   architecture text not null check (architecture in ('amd64', 'arm64')),
   status text not null
@@ -52,8 +53,21 @@ create table if not exists image_sync_workflow_runs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   last_synced_at timestamptz,
+  next_sync_at timestamptz not null default now(),
   completed_at timestamptz
 );
+
+alter table image_sync_workflow_runs
+  add column if not exists dispatch_key uuid;
+update image_sync_workflow_runs
+set dispatch_key = gen_random_uuid()
+where dispatch_key is null;
+alter table image_sync_workflow_runs
+  alter column dispatch_key set default gen_random_uuid();
+alter table image_sync_workflow_runs
+  alter column dispatch_key set not null;
+alter table image_sync_workflow_runs
+  add column if not exists next_sync_at timestamptz not null default now();
 
 -- The delivery persona was folded into developer. Preserve existing accounts by
 -- moving the legacy assignment before tightening the role constraint.
@@ -1689,6 +1703,8 @@ create index if not exists idx_sessions_expires_at on sessions(expires_at);
 create index if not exists idx_user_roles_role on user_roles(role, user_id);
 create index if not exists idx_image_sync_workflow_runs_user_created
   on image_sync_workflow_runs(user_id, created_at desc);
+create unique index if not exists idx_image_sync_workflow_runs_dispatch_key
+  on image_sync_workflow_runs(dispatch_key);
 create unique index if not exists idx_image_sync_workflow_runs_user_active
   on image_sync_workflow_runs(user_id)
   where status in ('dispatching', 'queued', 'in_progress');

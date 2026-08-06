@@ -40,7 +40,7 @@ import './image-sync-workbench.css'
 
 const statusLabels: Record<ImageSyncRunStatus, string> = {
   completed: '已完成',
-  dispatching: '正在提交',
+  dispatching: '等待 GitHub 确认',
   failed: '提交失败',
   in_progress: '执行中',
   queued: '排队中',
@@ -186,7 +186,7 @@ export function ImageSyncWorkbench() {
   }, [filteredRuns, selectedId])
 
   useEffect(() => {
-    if (!selectedRun || !isActive(selectedRun) || selectedRun.githubRunId == null) return
+    if (!selectedRun || !isActive(selectedRun)) return
     const timer = window.setInterval(() => {
       void refreshRun(selectedRun.id, true)
     }, 5_000)
@@ -353,7 +353,7 @@ export function ImageSyncWorkbench() {
                     </Button>
                   ) : null}
                   <Button
-                    disabled={busy || selectedRun.githubRunId == null}
+                    disabled={busy}
                     size="sm"
                     type="button"
                     variant="outline"

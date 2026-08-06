@@ -102,7 +102,11 @@ fine-grained Token. Apply the schema, sign in as two ordinary users, and verify 
 a task but can list and refresh only their own task IDs. Confirm the first user cannot infer the
 second user's task through direct ID lookup. Use a harmless public image, verify Run/Job/Step
 progress and the terminal conclusion, then confirm the GitHub link matches
-`labring/sealos-pro/actions/runs/*`. This test consumes runner, registry, and OSS resources.
+`labring/sealos-pro/actions/runs/*`. Also inject a dispatch response timeout, confirm the local
+task remains `dispatching`, then restore GitHub access and refresh until the matching
+`request_id` run is attached without a second workflow run. Confirm the workflow run name does
+not expose the image reference and that both the tar and md5 objects exist under the UTC date.
+This test consumes runner, registry, and OSS resources.
 
 Before an encryption-key change:
 
@@ -193,8 +197,11 @@ encrypted record, and the workflow that triggered rollback.
 - Package market fails: verify the HTTPS OSS origin, bucket credentials, bundled or
   configured rules file, and allowed object-key roots.
 - Image sync is unavailable: verify `GITHUB_ACTIONS_TOKEN` is present and scoped to
-  `labring/sealos-pro` with Actions write permission. A 409 means the current user already has
-  an active run; a 429 means the ten-runs-per-hour user quota or submission cooldown was reached.
+  `labring/sealos-pro` with Actions write permission, then verify the API host is reachable from
+  the Veges runtime. A transient dispatch timeout should leave the task in `dispatching`; use
+  refresh to reconcile the `request_id` run name before submitting anything else. A 409 means
+  the current user already has an active run; a 429 means the ten-runs-per-hour user quota or
+  submission cooldown was reached.
 - Todo image upload fails: verify OSS config, upload size/type, and the URL-signing secret
   or its documented fallback.
 - AI returns 503: verify `AI_API_BASE`, `AI_API_KEY`, and `AI_MODEL` are all present in the

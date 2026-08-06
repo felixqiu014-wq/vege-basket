@@ -21,7 +21,7 @@
 | Personal weekly reports and reminders | `server/weekly-reports.ts`, `shared/weekly-report-deep-link.ts`, `src/components/weekly-report-workbench.tsx` |
 | Package timeline transactions | `server/project-package-timeline.ts` |
 | OSS rules and URL signing | `server/package-market.ts`, `server/trial-combo-package-rules.yaml` |
-| GitHub image sync workflow | `server/image-sync-workflows.ts` |
+| GitHub image sync workflow | `server/image-sync-workflows.ts`, external `sealos-pro/.github/workflows/sync-images-tar-oss.yml` |
 | Container runtime | `Dockerfile` |
 | Sealos install surface | `.sealos/template/index.yaml` |
 
@@ -166,7 +166,7 @@ must remain bound to the authorized project ID.
   `conversation-analysis`; AI turn status: `processing`, `completed`, `failed`,
   `cancelled`.
 - Daily digest run: `pending`, `processing`, `retry`, `sent`, `failed`, `skipped`.
-- Image sync run: `dispatching`, `queued`, `in_progress`, `completed`, `failed`; GitHub's terminal result remains in the separate `conclusion` field.
+- Image sync run: `dispatching`, `queued`, `in_progress`, `completed`, `failed`; GitHub's terminal result remains in the separate `conclusion` field. A server-generated `dispatch_key` is sent as workflow `request_id` and appears only in the GitHub run name for reconciliation; an uncertain dispatch stays `dispatching` until its run is found or the five-minute window expires.
 - Image sync filtering maps `completed/success` to success, active statuses to running, and every other terminal state to failure. Successful DTOs expose tar and MD5 `oss://` URIs derived from the server-side bucket, GitHub Run UTC date, image safe base, and architecture; these are object identifiers rather than signed public download URLs.
 - Personal weekly-report state: `draft`, `submitted`, `modified`; the detail endpoint may
   additionally return `empty` before a draft exists. The personal index returns metadata only,

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  buildImageSyncRunName,
   buildImageSyncArtifactUris,
   buildImageSyncTarObjectKey,
   classifyImageSyncRun,
@@ -12,6 +13,7 @@ import {
   mapGitHubRunStatus,
   normalizeGitHubJobs,
   normalizeImageSyncInput,
+  selectGitHubWorkflowRun,
 } from './image-sync-workflows.ts'
 
 test('normalizes supported image references and architectures', () => {
@@ -55,6 +57,32 @@ test('maps GitHub run states without trusting arbitrary conclusions', () => {
   assert.equal(isImageSyncRunTerminal('completed'), true)
   assert.equal(isImageSyncRunTerminal('failed'), true)
   assert.equal(isImageSyncRunTerminal('queued'), false)
+})
+
+test('correlates workflow runs by the server-generated dispatch key', () => {
+  const dispatchKey = '550e8400-e29b-41d4-a716-446655440000'
+  assert.equal(buildImageSyncRunName(dispatchKey), `Sync image tar [${dispatchKey}]`)
+  assert.deepEqual(selectGitHubWorkflowRun({
+    workflow_runs: [
+      {
+        created_at: '2026-08-06T01:54:00Z',
+        html_url: 'https://github.com/labring/sealos-pro/actions/runs/2',
+        id: 2,
+        name: 'Sync image tar [other]',
+      },
+      {
+        created_at: '2026-08-06T01:53:40Z',
+        html_url: 'https://github.com/labring/sealos-pro/actions/runs/1',
+        id: 1,
+        name: `Sync image tar [${dispatchKey}]`,
+      },
+    ],
+  }, dispatchKey), {
+    runCreatedAt: '2026-08-06T01:53:40.000Z',
+    runId: 1,
+    runUrl: 'https://github.com/labring/sealos-pro/actions/runs/1',
+  })
+  assert.equal(selectGitHubWorkflowRun({ workflow_runs: [{ id: 1 }] }, dispatchKey), null)
 })
 
 test('normalizes bounded GitHub jobs and steps', () => {

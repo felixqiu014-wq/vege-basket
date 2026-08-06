@@ -81,9 +81,11 @@ The production image builds `src/` into `dist/`, copies `server/`, and starts
   multi-table writes, encrypted timeline fields, and Markdown export.
 - `server/package-market.ts`: OSS configuration, package rules, object-key allowlisting,
   object access, and signed download URLs.
-- `server/image-sync-workflows.ts`: fixed-repository GitHub workflow dispatch, encrypted
-  user-owned run records, bounded Run/Job/Step synchronization, per-user admission,
-  successful artifact URI derivation, and owner-scoped failed-record cleanup.
+- `server/image-sync-workflows.ts`: fixed-repository GitHub workflow dispatch with a
+  persisted `dispatch_key`, recovery of ambiguous dispatch responses by matching the
+  workflow `run-name`, encrypted user-owned run records, bounded Run/Job/Step
+  synchronization, per-user admission, successful artifact URI derivation, and
+  owner-scoped failed-record cleanup.
 - `server/schema.ts`: idempotent PostgreSQL DDL and integrity indexes.
 - `server/crypto.ts`: AES-256-GCM envelopes and blind indexes.
 - `server/db.ts`: the shared PostgreSQL pool. Domain modules must use one checked-out
@@ -253,11 +255,14 @@ The schema is normalized around these groups:
 - Projects and collaboration: `projects`, `project_memberships`,
   `project_invite_links`, `project_integrations`, `collaborators`.
 - Personal image-sync history: `image_sync_workflow_runs` binds each local request to its
-  authenticated user and optional GitHub run ID. A partial unique index permits one active
-  task per user; image references are encrypted and progress stores only bounded job/step metadata.
-  The progress JSONB remains backward-compatible with the original job array while new writes
-  use `{ jobs, runCreatedAt }` so artifact paths retain the GitHub Run UTC date. Failed-record
-  cleanup deletes only the authenticated owner's local row and never calls GitHub or OSS deletion.
+  authenticated user, unique `dispatch_key`, and optional GitHub run ID. A partial unique
+  index permits one active task per user; image references are encrypted and progress stores
+  only bounded job/step metadata. A dispatch timeout keeps the row in `dispatching` while the
+  refresh route searches GitHub workflow runs by `run-name` before any new dispatch is allowed;
+  unresolved rows expire after five minutes. The progress JSONB remains backward-compatible
+  with the original job array while new writes use `{ jobs, runCreatedAt }` so artifact paths
+  retain the GitHub Run UTC date. Failed-record cleanup deletes only the authenticated owner's
+  local row and never calls GitHub or OSS deletion.
   Project health fields, `project_milestones`, their todo links, and milestone audit events
   are also stored with the project collaboration data.
 - Project knowledge: `journal_entries`, `todos`, `project_modules`,
@@ -384,8 +389,10 @@ Server startup validates encryption keys and executes `schemaSql`; starting the 
 database mutation, not a read-only smoke test. There is no automatic down migration.
 The image-sync surface additionally requires an instance-level `GITHUB_ACTIONS_TOKEN` scoped
 to `labring/sealos-pro` Actions write. It never accepts repository, workflow, ref, or token
-values from the browser. Real dispatch verification consumes GitHub runner and OSS resources
-and therefore requires explicit authorization.
+values from the browser. Each dispatch carries a server-generated UUID as the workflow
+`request_id`; uncertain POST responses remain recoverable until a matching GitHub `run-name`
+is found or the five-minute reconciliation window expires. Real dispatch verification consumes
+GitHub runner and OSS resources and therefore requires explicit authorization.
 The Sealos template provisions PostgreSQL, injects runtime configuration, probes
 `/api/health`, deploys one application replica, and runs the todo-digest worker every
 five minutes. Digest runs are unique per subscription/date, claimed with row locking and

@@ -36,6 +36,7 @@ type ImageSyncRunRow = {
   completed_at: string | null
   conclusion: string | null
   created_at: string
+  dispatch_key: string
   error_code: string | null
   error_message: string | null
   github_run_id: string | null
@@ -43,6 +44,7 @@ type ImageSyncRunRow = {
   id: string
   image_ref_encrypted: string
   last_synced_at: string | null
+  next_sync_at: string
   progress: unknown
   status: ImageSyncRunStatus
   updated_at: string
@@ -54,6 +56,7 @@ type GitHubWorkflowRun = {
   created_at?: unknown
   html_url?: unknown
   id?: unknown
+  name?: unknown
   status?: unknown
   updated_at?: unknown
 }
@@ -80,23 +83,39 @@ const githubWorkflow = 'sync-images-tar-oss.yml'
 const githubRef = 'main'
 const githubApiRoot = `https://api.github.com/repos/${githubOwner}/${githubRepo}`
 const activeStatuses: readonly ImageSyncRunStatus[] = ['dispatching', 'queued', 'in_progress']
+const dispatchReconciliationWindowMs = 5 * 60 * 1000
 const defaultImageSyncDownloadExpireSeconds = 30 * 60
 const maxImageSyncDownloadExpireSeconds = 7 * 24 * 60 * 60
 
 export class ImageSyncWorkflowError extends Error {
   code: string
+  retryAfterSeconds: number | null
   status: number
 
-  constructor(code: string, message: string, status: number) {
+  constructor(code: string, message: string, status: number, retryAfterSeconds: number | null = null) {
     super(message)
     this.name = 'ImageSyncWorkflowError'
     this.code = code
+    this.retryAfterSeconds = retryAfterSeconds
     this.status = status
   }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseRetryAfterSeconds(response: Response) {
+  const retryAfter = response.headers.get('retry-after')?.trim() ?? ''
+  const numeric = Number(retryAfter)
+  if (Number.isFinite(numeric) && numeric >= 0) return Math.min(Math.ceil(numeric), 3600)
+  const date = Date.parse(retryAfter)
+  if (Number.isFinite(date)) return Math.min(Math.max(Math.ceil((date - Date.now()) / 1000), 0), 3600)
+  const reset = Number(response.headers.get('x-ratelimit-reset'))
+  if (Number.isFinite(reset) && reset > Date.now() / 1000) {
+    return Math.min(Math.ceil(reset - Date.now() / 1000), 3600)
+  }
+  return 60
 }
 
 function boundedString(value: unknown, maxLength = 160) {
@@ -106,6 +125,10 @@ function boundedString(value: unknown, maxLength = 160) {
 function nullableString(value: unknown, maxLength = 160) {
   const normalized = boundedString(value, maxLength)
   return normalized || null
+}
+
+export function buildImageSyncRunName(dispatchKey: string) {
+  return `Sync image tar [${dispatchKey}]`
 }
 
 function normalizeIsoDate(value: unknown) {
@@ -118,6 +141,36 @@ function normalizeIsoDate(value: unknown) {
 function positiveInteger(value: unknown) {
   const number = Number(value)
   return Number.isSafeInteger(number) && number > 0 ? number : null
+}
+
+export function selectGitHubWorkflowRun(value: unknown, dispatchKey: string) {
+  if (!isRecord(value) || !Array.isArray(value.workflow_runs)) return null
+  const expectedName = buildImageSyncRunName(dispatchKey)
+  return value.workflow_runs
+    .flatMap((candidate) => {
+      if (!isRecord(candidate)) return []
+      const run = candidate as GitHubWorkflowRun
+      const runId = positiveInteger(run.id)
+      const runName = boundedString(run.name, 240)
+      const runUrl = boundedString(run.html_url, 500)
+      if (
+        runId == null ||
+        runName !== expectedName ||
+        !runUrl.startsWith(`https://github.com/${githubOwner}/${githubRepo}/actions/runs/`)
+      ) {
+        return []
+      }
+      return [{
+        runCreatedAt: normalizeIsoDate(run.created_at),
+        runId,
+        runUrl,
+      }]
+    })
+    .sort((left, right) => {
+      const leftTime = left.runCreatedAt ? Date.parse(left.runCreatedAt) : 0
+      const rightTime = right.runCreatedAt ? Date.parse(right.runCreatedAt) : 0
+      return rightTime - leftTime
+    })[0] ?? null
 }
 
 function isPrivateIpv4(hostname: string) {
@@ -348,6 +401,20 @@ async function githubRequest(path: string, options: RequestInit = {}) {
       signal: controller.signal,
     })
     if (!response.ok) {
+      const rateLimited = response.status === 429 || (
+        response.status === 403 && (
+          response.headers.has('retry-after') ||
+          response.headers.get('x-ratelimit-remaining') === '0'
+        )
+      )
+      if (rateLimited) {
+        throw new ImageSyncWorkflowError(
+          'GITHUB_ACTIONS_RATE_LIMITED',
+          'GitHub Actions 请求受到限流，请稍后重试。',
+          429,
+          parseRetryAfterSeconds(response),
+        )
+      }
       if (response.status === 401 || response.status === 403) {
         throw new ImageSyncWorkflowError(
           'GITHUB_ACTIONS_FORBIDDEN',
@@ -385,12 +452,12 @@ async function githubRequest(path: string, options: RequestInit = {}) {
 export async function dispatchImageSyncWorkflow(input: {
   arch: ImageSyncArchitecture
   image: string
-}) {
+}, dispatchKey: string) {
   const result = await githubRequest(
     `/actions/workflows/${encodeURIComponent(githubWorkflow)}/dispatches`,
     {
       body: JSON.stringify({
-        inputs: { arch: input.arch, image: input.image },
+        inputs: { arch: input.arch, image: input.image, request_id: dispatchKey },
         ref: githubRef,
       }),
       method: 'POST',
@@ -398,21 +465,38 @@ export async function dispatchImageSyncWorkflow(input: {
   )
   if (!isRecord(result)) {
     throw new ImageSyncWorkflowError(
-      'GITHUB_RUN_ID_MISSING',
-      'GitHub 已接收任务，但未返回可跟踪的运行编号。',
-      502,
+      'GITHUB_DISPATCH_UNCERTAIN',
+      '正在确认 GitHub 是否已接收任务。',
+      202,
     )
   }
   const runId = positiveInteger(result.workflow_run_id)
   const runUrl = boundedString(result.html_url, 500)
   if (runId == null || !runUrl.startsWith(`https://github.com/${githubOwner}/${githubRepo}/actions/runs/`)) {
     throw new ImageSyncWorkflowError(
-      'GITHUB_RUN_ID_MISSING',
-      'GitHub 已接收任务，但未返回可跟踪的运行编号。',
-      502,
+      'GITHUB_DISPATCH_UNCERTAIN',
+      '正在确认 GitHub 是否已接收任务。',
+      202,
     )
   }
   return { runId, runUrl }
+}
+
+async function findGitHubWorkflowRun(dispatchKey: string, createdAt: string) {
+  const created = new Date(createdAt)
+  const createdAfter = Number.isNaN(created.getTime())
+    ? new Date(Date.now() - dispatchReconciliationWindowMs).toISOString()
+    : new Date(created.getTime() - 60 * 1000).toISOString()
+  const params = new URLSearchParams({
+    branch: githubRef,
+    created: `>=${createdAfter}`,
+    event: 'workflow_dispatch',
+    per_page: '100',
+  })
+  const value = await githubRequest(
+    `/actions/workflows/${encodeURIComponent(githubWorkflow)}/runs?${params.toString()}`,
+  )
+  return selectGitHubWorkflowRun(value, dispatchKey)
 }
 
 async function loadGitHubRun(githubRunId: number) {
@@ -529,10 +613,36 @@ function createImageSyncDownloadLink(row: ImageSyncRunRow) {
 }
 
 const runColumns = `
-  id, user_id, image_ref_encrypted, architecture, status, conclusion,
+  id, user_id, dispatch_key, image_ref_encrypted, architecture, status, conclusion,
   github_run_id, github_run_url, progress, error_code, error_message,
-  created_at, updated_at, last_synced_at, completed_at
+  created_at, updated_at, last_synced_at, next_sync_at, completed_at
 `
+
+function isRecoverableGitHubError(error: unknown): boolean {
+  return error instanceof ImageSyncWorkflowError && (
+    error.code === 'GITHUB_ACTIONS_UNAVAILABLE' ||
+    error.code === 'GITHUB_ACTIONS_RATE_LIMITED' ||
+    error.code === 'GITHUB_DISPATCH_UNCERTAIN'
+  )
+}
+
+function isDispatchReconciliationExpired(row: ImageSyncRunRow) {
+  const createdAt = new Date(row.created_at).getTime()
+  return Number.isFinite(createdAt) && Date.now() - createdAt >= dispatchReconciliationWindowMs
+}
+
+async function deferOwnedRunSync(row: ImageSyncRunRow, delaySeconds = 5) {
+  const delay = Math.max(1, Math.min(Math.ceil(delaySeconds), 3600))
+  const updated = await query<ImageSyncRunRow>(
+    `update image_sync_workflow_runs
+     set last_synced_at = now(), next_sync_at = clock_timestamp() + ($1::integer * interval '1 second'),
+         updated_at = now()
+     where id = $2 and user_id = $3 and status in ('dispatching', 'queued', 'in_progress')
+     returning ${runColumns}`,
+    [delay, row.id, row.user_id],
+  )
+  return updated.rows[0] ?? row
+}
 
 async function findOwnedRun(userId: number, runId: number) {
   const result = await query<ImageSyncRunRow>(
@@ -540,6 +650,52 @@ async function findOwnedRun(userId: number, runId: number) {
     [runId, userId],
   )
   return result.rows[0] ?? null
+}
+
+async function bindOwnedRunToGitHub(
+  row: ImageSyncRunRow,
+  matched: { runCreatedAt: string | null; runId: number; runUrl: string },
+) {
+  const storedProgress = parseProgress(row.progress)
+  const updated = await query<ImageSyncRunRow>(
+    `update image_sync_workflow_runs
+     set status = 'queued', github_run_id = $1,
+         github_run_url = coalesce(nullif($2, ''), github_run_url),
+         progress = $3::jsonb, last_synced_at = now(), next_sync_at = clock_timestamp(), updated_at = now()
+     where id = $4 and user_id = $5 and status = 'dispatching'
+     returning ${runColumns}`,
+    [
+      matched.runId,
+      matched.runUrl,
+      JSON.stringify({ jobs: storedProgress.jobs, runCreatedAt: matched.runCreatedAt }),
+      row.id,
+      row.user_id,
+    ],
+  )
+  return updated.rows[0] ?? row
+}
+
+async function syncOwnedRunFromGitHub(row: ImageSyncRunRow, githubRunId: number) {
+  const current = await loadGitHubRun(githubRunId)
+  const updated = await query<ImageSyncRunRow>(
+    `update image_sync_workflow_runs
+     set status = $1, conclusion = $2, github_run_id = $3,
+         github_run_url = coalesce(nullif($4, ''), github_run_url),
+         progress = $5::jsonb, last_synced_at = now(), next_sync_at = clock_timestamp(), updated_at = now(),
+         completed_at = case when $1 = 'completed' then coalesce(completed_at, now()) else completed_at end
+     where id = $6 and user_id = $7
+     returning ${runColumns}`,
+    [
+      current.status,
+      current.conclusion,
+      githubRunId,
+      current.runUrl,
+      JSON.stringify({ jobs: current.progress, runCreatedAt: current.runCreatedAt }),
+      row.id,
+      row.user_id,
+    ],
+  )
+  return updated.rows[0] ?? row
 }
 
 async function createDispatchingRun(
@@ -555,7 +711,7 @@ async function createDispatchingRun(
     `update image_sync_workflow_runs
      set status = 'failed', error_code = 'DISPATCH_LEASE_EXPIRED',
          error_message = '任务提交超时，请重新发起。', updated_at = now(), completed_at = now()
-     where user_id = $1 and status = 'dispatching' and created_at < now() - interval '2 minutes'`,
+     where user_id = $1 and status = 'dispatching' and created_at < now() - interval '5 minutes'`,
     [userId],
   )
   const recent = await client.query<{ active: boolean; cooling_down: boolean; hourly_count: string }>(
@@ -621,7 +777,7 @@ imageSyncWorkflowRouter.post('/image-sync-runs', async (request, response, next)
     }
 
     try {
-      const dispatched = await dispatchImageSyncWorkflow(input)
+      const dispatched = await dispatchImageSyncWorkflow(input, localRun.dispatch_key)
       const updated = await query<ImageSyncRunRow>(
         `update image_sync_workflow_runs
          set status = 'queued', github_run_id = $1, github_run_url = $2, updated_at = now()
@@ -631,13 +787,13 @@ imageSyncWorkflowRouter.post('/image-sync-runs', async (request, response, next)
       )
       response.status(201).json({ run: serializeRun(updated.rows[0] ?? localRun) })
     } catch (error) {
-      const safeError = error instanceof ImageSyncWorkflowError
-        ? error
-        : new ImageSyncWorkflowError(
-            'GITHUB_ACTIONS_UNAVAILABLE',
-            '无法连接 GitHub Actions，请稍后重试。',
-            502,
-          )
+      if (error instanceof ImageSyncWorkflowError && isRecoverableGitHubError(error)) {
+        const deferred = await deferOwnedRunSync(localRun, error.retryAfterSeconds ?? 5)
+        response.status(202).json({ run: serializeRun(deferred) })
+        return
+      }
+      if (!(error instanceof ImageSyncWorkflowError)) throw error
+      const safeError = error
       const failed = await query<ImageSyncRunRow>(
         `update image_sync_workflow_runs
          set status = 'failed', error_code = $1, error_message = $2,
@@ -764,29 +920,54 @@ imageSyncWorkflowRouter.get('/image-sync-runs/:runId', async (request, response,
       return
     }
     const shouldRefresh = request.query.refresh === 'true'
-    const githubRunId = row.github_run_id ? Number(row.github_run_id) : null
-    if (shouldRefresh && githubRunId && !isImageSyncRunTerminal(row.status)) {
+    let githubRunId = row.github_run_id ? Number(row.github_run_id) : null
+    if (shouldRefresh && !isImageSyncRunTerminal(row.status)) {
+      const nextSyncAt = Date.parse(row.next_sync_at)
+      if (Number.isFinite(nextSyncAt) && nextSyncAt > Date.now()) {
+        response.json({ run: serializeRun(row) })
+        return
+      }
       try {
-        const current = await loadGitHubRun(githubRunId)
-        const updated = await query<ImageSyncRunRow>(
-          `update image_sync_workflow_runs
-           set status = $1, conclusion = $2, github_run_url = coalesce(nullif($3, ''), github_run_url),
-               progress = $4::jsonb, last_synced_at = now(), updated_at = now(),
-               completed_at = case when $1 = 'completed' then coalesce(completed_at, now()) else completed_at end
-           where id = $5 and user_id = $6
-           returning ${runColumns}`,
-          [
-            current.status,
-            current.conclusion,
-            current.runUrl,
-            JSON.stringify({ jobs: current.progress, runCreatedAt: current.runCreatedAt }),
-            runId,
-            session.userId,
-          ],
-        )
-        row = updated.rows[0] ?? row
+        if (githubRunId == null && row.status === 'dispatching') {
+          if (isDispatchReconciliationExpired(row)) {
+            const expired = await query<ImageSyncRunRow>(
+              `update image_sync_workflow_runs
+               set status = 'failed', error_code = 'DISPATCH_RECONCILIATION_TIMEOUT',
+                   error_message = '未能确认 GitHub 是否已接收任务，请重新发起。',
+                   updated_at = now(), completed_at = now()
+               where id = $1 and user_id = $2 and status = 'dispatching'
+               returning ${runColumns}`,
+              [runId, session.userId],
+            )
+            row = expired.rows[0] ?? row
+          } else {
+            const matched = await findGitHubWorkflowRun(row.dispatch_key, row.created_at)
+            if (matched) {
+              githubRunId = matched.runId
+              row = await bindOwnedRunToGitHub(row, matched)
+              row = await syncOwnedRunFromGitHub(row, matched.runId)
+            } else {
+              const touched = await query<ImageSyncRunRow>(
+                `update image_sync_workflow_runs
+                 set last_synced_at = now(), next_sync_at = clock_timestamp() + interval '5 seconds',
+                     updated_at = now()
+                 where id = $1 and user_id = $2 and status = 'dispatching'
+                 returning ${runColumns}`,
+                [runId, session.userId],
+              )
+              row = touched.rows[0] ?? row
+            }
+          }
+        } else if (githubRunId != null) {
+          row = await syncOwnedRunFromGitHub(row, githubRunId)
+        }
       } catch (error) {
         if (!(error instanceof ImageSyncWorkflowError)) throw error
+        if (isRecoverableGitHubError(error)) {
+          row = await deferOwnedRunSync(row, error.retryAfterSeconds ?? 5)
+          response.json({ run: serializeRun(row) })
+          return
+        }
         response.status(error.status).json({
           code: error.code,
           error: error.message,
