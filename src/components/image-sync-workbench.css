@@ -248,39 +248,78 @@
   border: 1px solid var(--line);
 }
 
-.image-sync-artifacts header,
-.image-sync-artifacts > div {
+.image-sync-artifacts header {
   display: grid;
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-}
-
-.image-sync-artifacts header {
   grid-template-columns: 1fr auto;
   border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
 
-.image-sync-artifacts header span,
-.image-sync-artifacts > div > span {
+.image-sync-artifacts header span {
   color: var(--muted-text);
   font-size: 11px;
 }
 
-.image-sync-artifacts > div {
-  grid-template-columns: 72px minmax(0, 1fr) 32px;
-  border-bottom: 1px solid var(--line);
+.image-sync-artifact-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
 }
 
-.image-sync-artifacts > div:last-child {
-  border-bottom: 0;
+.image-sync-artifact-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--surface) 92%, var(--field));
 }
 
-.image-sync-artifacts code {
+.image-sync-artifact-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.image-sync-artifact-meta {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.image-sync-artifact-meta strong {
+  color: var(--strong);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.image-sync-artifact-meta small {
   overflow: hidden;
-  color: var(--text);
+  color: var(--muted-text);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-sync-artifact-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.image-sync-artifact-card code {
+  overflow: hidden;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--field) 78%, var(--surface));
+  color: var(--strong);
+  font-size: 12px;
+  line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -393,12 +432,16 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .image-sync-artifacts > div {
-    grid-template-columns: 1fr 32px;
+  .image-sync-artifact-head {
+    flex-direction: column;
   }
 
-  .image-sync-artifacts > div > span {
-    grid-column: 1 / -1;
+  .image-sync-artifact-actions {
+    width: 100%;
+  }
+
+  .image-sync-artifact-actions > * {
+    flex: 1;
   }
 }
 

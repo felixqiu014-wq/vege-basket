@@ -23,6 +23,7 @@ import {
   ShoppingCartSimple,
   SortAscending,
   SortDescending,
+  TerminalWindow,
   Trash,
 } from '@phosphor-icons/react'
 import { Badge } from '@/components/ui/badge'
@@ -54,6 +55,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { getProjectPackageOperationTitle } from '@/lib/project-package-operation'
+import { createWgetDownloadCommand } from '@/lib/download-command'
 import {
   TodoFilterBuilderDialog,
   matchesTodoFilterConditions,
@@ -725,6 +727,19 @@ export function PackageMarketBrowser({
               }
             >
               <Copy size={15} /> {copiedLabel(`browser-copy-download-url-${link.objectKey}`, '链接')}
+            </Button>
+            <Button
+              className="ghost-button"
+              variant="outline"
+              type="button"
+              onClick={() =>
+                void copyToClipboard(
+                  createWgetDownloadCommand(link.downloadUrl, fileName),
+                  `browser-copy-download-command-${link.objectKey}`,
+                )
+              }
+            >
+              <TerminalWindow size={15} /> {copiedLabel(`browser-copy-download-command-${link.objectKey}`, '命令')}
             </Button>
             <Button
               className="ghost-button"
@@ -1660,6 +1675,21 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     }
   }
 
+  async function copyPackageItemDownloadCommand(item: ProjectPackageItem) {
+    setCopyingPackageItemId(item.id)
+    try {
+      const downloadUrl = await onLoadPackageItemDownloadUrl(item.id)
+      await copyToClipboard(
+        createWgetDownloadCommand(downloadUrl, packageItemFileName(item)),
+        `package-item-download-command-${item.id}`,
+      )
+    } catch {
+      return
+    } finally {
+      setCopyingPackageItemId((current) => (current === item.id ? null : current))
+    }
+  }
+
   function addMarketLinkToCart(
     context: PackageMarketDetailContext | null,
     detail: PackageMarketDetail,
@@ -2313,6 +2343,19 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
               }
             >
               <Copy size={15} /> {copiedLabel(`copy-download-url-${link.objectKey}`, '链接')}
+            </Button>
+            <Button
+              className="ghost-button"
+              variant="outline"
+              type="button"
+              onClick={() =>
+                void copyToClipboard(
+                  createWgetDownloadCommand(link.downloadUrl, fileName),
+                  `copy-download-command-${link.objectKey}`,
+                )
+              }
+            >
+              <TerminalWindow size={15} /> {copiedLabel(`copy-download-command-${link.objectKey}`, '命令')}
             </Button>
             <Button
               className="solid-button"
@@ -3073,6 +3116,22 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                                         type="button"
                                       >
                                         {copied ? <Check size={13} weight="bold" /> : <Copy size={13} />}
+                                      </button>
+                                      <button
+                                        aria-label={copiedValue === `package-item-download-command-${item.id}`
+                                          ? `已复制 ${fileName} 的 Linux 下载命令`
+                                          : `复制 ${fileName} 的 Linux 下载命令`}
+                                        className={copiedValue === `package-item-download-command-${item.id}`
+                                          ? 'package-file-copy-button is-copied'
+                                          : 'package-file-copy-button'}
+                                        disabled={copyingPackageItemId === item.id}
+                                        onClick={() => void copyPackageItemDownloadCommand(item)}
+                                        title={copiedValue === `package-item-download-command-${item.id}` ? '已复制' : '复制 Linux 下载命令'}
+                                        type="button"
+                                      >
+                                        {copiedValue === `package-item-download-command-${item.id}`
+                                          ? <Check size={13} weight="bold" />
+                                          : <TerminalWindow size={13} />}
                                       </button>
                                     </div>
                                   )
