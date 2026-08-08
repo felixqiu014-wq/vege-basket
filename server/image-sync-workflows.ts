@@ -9,6 +9,8 @@ import { getAuthenticatedRoleSession } from './roles.ts'
 
 export const imageSyncArchitectures = ['amd64', 'arm64'] as const
 export type ImageSyncArchitecture = (typeof imageSyncArchitectures)[number]
+export const imageSyncArtifactKinds = ['tar', 'md5'] as const
+export type ImageSyncArtifactKind = (typeof imageSyncArtifactKinds)[number]
 export type ImageSyncRunStatus = 'dispatching' | 'queued' | 'in_progress' | 'completed' | 'failed'
 export type ImageSyncRunGroup = 'failure' | 'running' | 'success'
 
@@ -279,21 +281,32 @@ export function getImageSyncDownloadExpireSeconds(value: unknown = process.env.I
   return seconds
 }
 
+export function buildImageSyncArtifactObjectKey(input: {
+  arch: ImageSyncArchitecture
+  bucket: unknown
+  image: string
+  runCreatedAt: string
+}, artifact: ImageSyncArtifactKind = 'tar') {
+  const bucket = normalizeOssBucket(input.bucket)
+  const artifacts = buildImageSyncArtifactUris(input)
+  if (!bucket || !artifacts) return null
+  const prefix = `oss://${bucket}/`
+  const artifactUri = artifact === 'md5' ? artifacts.md5Uri : artifacts.tarUri
+  if (!artifactUri.startsWith(prefix)) return null
+  const objectKey = artifactUri.slice(prefix.length)
+  const suffix = artifact === 'md5' ? '\\.tar\\.md5' : '\\.tar'
+  return new RegExp(`^temp\\/\\d{4}\\/\\d{2}\\/\\d{2}\\/[a-z0-9]+(?:-[a-z0-9]+)*-(?:amd64|arm64)${suffix}$`).test(objectKey)
+    ? objectKey
+    : null
+}
+
 export function buildImageSyncTarObjectKey(input: {
   arch: ImageSyncArchitecture
   bucket: unknown
   image: string
   runCreatedAt: string
 }) {
-  const bucket = normalizeOssBucket(input.bucket)
-  const artifacts = buildImageSyncArtifactUris(input)
-  if (!bucket || !artifacts) return null
-  const prefix = `oss://${bucket}/`
-  if (!artifacts.tarUri.startsWith(prefix)) return null
-  const objectKey = artifacts.tarUri.slice(prefix.length)
-  return /^temp\/\d{4}\/\d{2}\/\d{2}\/[a-z0-9]+(?:-[a-z0-9]+)*-(?:amd64|arm64)\.tar$/.test(objectKey)
-    ? objectKey
-    : null
+  return buildImageSyncArtifactObjectKey(input, 'tar')
 }
 
 function imageSyncOssClient() {
@@ -489,25 +502,25 @@ function serializeRun(row: ImageSyncRunRow) {
   }
 }
 
-function createImageSyncDownloadLink(row: ImageSyncRunRow) {
+function createImageSyncDownloadLink(row: ImageSyncRunRow, artifact: ImageSyncArtifactKind) {
   if (classifyImageSyncRun(row.status, row.conclusion) !== 'success') {
     throw new ImageSyncWorkflowError(
       'IMAGE_SYNC_ARTIFACT_UNAVAILABLE',
-      '该任务尚未生成可下载的镜像归档。',
+      '该任务尚未生成可下载的镜像产物。',
       409,
     )
   }
   const storedProgress = parseProgress(row.progress)
-  const objectKey = buildImageSyncTarObjectKey({
+  const objectKey = buildImageSyncArtifactObjectKey({
     arch: row.architecture,
     bucket: process.env.OSS_BUCKET,
     image: decryptText(row.image_ref_encrypted),
     runCreatedAt: storedProgress.runCreatedAt ?? row.created_at,
-  })
+  }, artifact)
   if (!objectKey) {
     throw new ImageSyncWorkflowError(
       'IMAGE_SYNC_ARTIFACT_UNAVAILABLE',
-      '该任务尚未生成可下载的镜像归档。',
+      '该任务尚未生成可下载的镜像产物。',
       409,
     )
   }
@@ -731,12 +744,20 @@ imageSyncWorkflowRouter.get('/image-sync-runs/:runId/download-url', async (reque
       response.status(404).json({ error: '镜像同步任务不存在。' })
       return
     }
+    const artifact = String(request.query.artifact ?? 'tar').trim().toLowerCase()
+    if (!imageSyncArtifactKinds.includes(artifact as ImageSyncArtifactKind)) {
+      response.status(400).json({
+        code: 'INVALID_IMAGE_SYNC_ARTIFACT',
+        error: '镜像同步产物类型无效。',
+      })
+      return
+    }
     const row = await findOwnedRun(session.userId, runId)
     if (!row) {
       response.status(404).json({ error: '镜像同步任务不存在。' })
       return
     }
-    response.json(createImageSyncDownloadLink(row))
+    response.json(createImageSyncDownloadLink(row, artifact as ImageSyncArtifactKind))
   } catch (error) {
     if (error instanceof ImageSyncWorkflowError) {
       response.status(error.status).json({ code: error.code, error: error.message })

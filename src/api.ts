@@ -5,6 +5,7 @@ import type {
   AiTurnPage,
   AiTurnRunResponse,
   ImageSyncArchitecture,
+  ImageSyncArtifactKind,
   ImageSyncDownloadLink,
   ImageSyncRun,
   JournalVisibility,
@@ -368,8 +369,9 @@ export function fetchImageSyncRun(runId: number, refresh = false) {
   return request<{ run: ImageSyncRun }>(`/api/image-sync-runs/${runId}${params}`)
 }
 
-export function fetchImageSyncRunDownloadUrl(runId: number) {
-  return request<ImageSyncDownloadLink>(`/api/image-sync-runs/${runId}/download-url`)
+export function fetchImageSyncRunDownloadUrl(runId: number, artifact: ImageSyncArtifactKind = 'tar') {
+  const suffix = artifact === 'tar' ? '' : `?artifact=${encodeURIComponent(artifact)}`
+  return request<ImageSyncDownloadLink>(`/api/image-sync-runs/${runId}/download-url${suffix}`)
 }
 
 export function deleteImageSyncRun(runId: number) {

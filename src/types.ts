@@ -5,6 +5,7 @@ export type ProjectAccessRole = 'owner' | 'member'
 export type JournalVisibility = 'private' | 'public'
 
 export type ImageSyncArchitecture = 'amd64' | 'arm64'
+export type ImageSyncArtifactKind = 'tar' | 'md5'
 export type ImageSyncRunStatus = 'dispatching' | 'queued' | 'in_progress' | 'completed' | 'failed'
 
 export type ImageSyncRunStep = {

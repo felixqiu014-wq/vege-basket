@@ -21,6 +21,7 @@ import {
 } from '@/api'
 import type {
   ImageSyncArchitecture,
+  ImageSyncArtifactKind,
   ImageSyncRun,
   ImageSyncRunStatus,
 } from '@/types'
@@ -229,13 +230,13 @@ export function ImageSyncWorkbench() {
     }
   }
 
-  async function copyDownloadUrl(runId: number) {
+  async function copyDownloadUrl(runId: number, artifact: ImageSyncArtifactKind) {
     setDownloadCopyRunId(runId)
     setError('')
     try {
-      const { downloadUrl } = await fetchImageSyncRunDownloadUrl(runId)
+      const { downloadUrl } = await fetchImageSyncRunDownloadUrl(runId, artifact)
       await navigator.clipboard.writeText(downloadUrl)
-      const copiedKey = `download-${runId}`
+      const copiedKey = `download-${artifact}-${runId}`
       setCopiedUri(copiedKey)
       window.setTimeout(() => setCopiedUri((current) => current === copiedKey ? '' : current), 1_500)
     } catch (copyError) {
@@ -245,13 +246,13 @@ export function ImageSyncWorkbench() {
     }
   }
 
-  async function copyDownloadCommand(runId: number, outputName: string) {
+  async function copyDownloadCommand(runId: number, artifact: ImageSyncArtifactKind, outputName: string) {
     setDownloadCopyRunId(runId)
     setError('')
     try {
-      const { downloadUrl } = await fetchImageSyncRunDownloadUrl(runId)
+      const { downloadUrl } = await fetchImageSyncRunDownloadUrl(runId, artifact)
       await navigator.clipboard.writeText(createWgetDownloadCommand(downloadUrl, outputName))
-      const copiedKey = `download-command-${runId}`
+      const copiedKey = `download-command-${artifact}-${runId}`
       setCopiedUri(copiedKey)
       window.setTimeout(() => setCopiedUri((current) => current === copiedKey ? '' : current), 1_500)
     } catch (copyError) {
@@ -413,9 +414,10 @@ export function ImageSyncWorkbench() {
                       ['MD5 校验', selectedRun.artifacts.md5Uri],
                     ] as const).map(([label, uri]) => {
                       const objectKey = imageSyncArtifactObjectKey(uri)
+                      const artifact: ImageSyncArtifactKind = label === 'MD5 校验' ? 'md5' : 'tar'
                       const copiedObjectKey = `key-${objectKey}`
-                      const copiedDownloadUrl = `download-${selectedRun.id}`
-                      const copiedDownloadCommandKey = `download-command-${selectedRun.id}`
+                      const copiedDownloadUrl = `download-${artifact}-${selectedRun.id}`
+                      const copiedDownloadCommandKey = `download-command-${artifact}-${selectedRun.id}`
                       return (
                         <article className="image-sync-artifact-card" key={label}>
                           <div className="image-sync-artifact-head">
@@ -424,38 +426,34 @@ export function ImageSyncWorkbench() {
                               <small>{objectKey.split('/').at(-1)}</small>
                             </div>
                             <div className="image-sync-artifact-actions">
-                              {label === '镜像归档' ? (
-                                <Button
-                                  aria-label={copiedUri === copiedDownloadUrl ? '已复制链接' : '复制链接'}
-                                  className="ghost-button"
-                                  disabled={downloadCopyRunId === selectedRun.id}
-                                  title="复制链接"
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => void copyDownloadUrl(selectedRun.id)}
-                                >
-                                  {downloadCopyRunId === selectedRun.id
-                                    ? <SpinnerGap className="image-sync-spin" />
-                                    : copiedUri === copiedDownloadUrl ? <CheckCircle weight="fill" /> : <CopySimple />}
-                                  {copiedUri === copiedDownloadUrl ? '已复制' : '链接'}
-                                </Button>
-                              ) : null}
-                              {label === '镜像归档' ? (
-                                <Button
-                                  aria-label={copiedUri === copiedDownloadCommandKey ? '已复制下载命令' : '复制下载命令'}
-                                  className="ghost-button"
-                                  disabled={downloadCopyRunId === selectedRun.id}
-                                  title="复制 Linux 下载命令"
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => void copyDownloadCommand(selectedRun.id, objectKey)}
-                                >
-                                  {downloadCopyRunId === selectedRun.id
-                                    ? <SpinnerGap className="image-sync-spin" />
-                                    : copiedUri === copiedDownloadCommandKey ? <CheckCircle weight="fill" /> : <TerminalWindow />}
-                                  {copiedUri === copiedDownloadCommandKey ? '已复制' : '命令'}
-                                </Button>
-                              ) : null}
+                              <Button
+                                aria-label={copiedUri === copiedDownloadUrl ? '已复制链接' : '复制链接'}
+                                className="ghost-button"
+                                disabled={downloadCopyRunId === selectedRun.id}
+                                title="复制链接"
+                                type="button"
+                                variant="outline"
+                                onClick={() => void copyDownloadUrl(selectedRun.id, artifact)}
+                              >
+                                {downloadCopyRunId === selectedRun.id
+                                  ? <SpinnerGap className="image-sync-spin" />
+                                  : copiedUri === copiedDownloadUrl ? <CheckCircle weight="fill" /> : <CopySimple />}
+                                {copiedUri === copiedDownloadUrl ? '已复制' : '链接'}
+                              </Button>
+                              <Button
+                                aria-label={copiedUri === copiedDownloadCommandKey ? '已复制下载命令' : '复制下载命令'}
+                                className="ghost-button"
+                                disabled={downloadCopyRunId === selectedRun.id}
+                                title="复制 Linux 下载命令"
+                                type="button"
+                                variant="outline"
+                                onClick={() => void copyDownloadCommand(selectedRun.id, artifact, objectKey)}
+                              >
+                                {downloadCopyRunId === selectedRun.id
+                                  ? <SpinnerGap className="image-sync-spin" />
+                                  : copiedUri === copiedDownloadCommandKey ? <CheckCircle weight="fill" /> : <TerminalWindow />}
+                                {copiedUri === copiedDownloadCommandKey ? '已复制' : '命令'}
+                              </Button>
                               <Button
                                 aria-label={copiedUri === copiedObjectKey ? '已复制 Key' : '复制 Key'}
                                 className="ghost-button"
