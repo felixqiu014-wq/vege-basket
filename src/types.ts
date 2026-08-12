@@ -368,6 +368,8 @@ export type ProjectPackageEvent = {
   title: string
   createdAt: string
   deliveryDate: string
+  deliveryEndAt: string
+  deliveryStartAt: string
   updatedAt: string
   operations: ProjectPackageOperation[]
   publishedAt?: string
@@ -387,6 +389,8 @@ export type ProjectPackageEventSavePayload = {
   action: 'publish' | 'save_draft'
   assigneeUserId: number
   deliveryDate: string
+  deliveryEndAt: string
+  deliveryStartAt: string
   documents: ProjectPackageEventDocumentInput[]
   items: Array<{
     sourcePackageId: string

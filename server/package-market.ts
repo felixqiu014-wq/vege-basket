@@ -68,6 +68,7 @@ const downloadExpireSeconds = Number(
     30 * 60,
 )
 export const packageMarketExpireMinuteOptions = [30, 60, 90, 120, 300, 600] as const
+export const packageMarketExpireMaxMinutes = 365 * 24 * 60
 const defaultMiddlewareRoot = 'offline/sealos-pro/'
 const middlewareRoots = normalizeList([
   process.env.PACKAGE_MARKET_MIDDLEWARE_ROOT,
@@ -1306,7 +1307,7 @@ export function getPackageMarketExpireMinutes() {
 
 export function normalizePackageMarketExpireMinutes(value: unknown) {
   const minutes = Number(value)
-  return packageMarketExpireMinuteOptions.includes(minutes as (typeof packageMarketExpireMinuteOptions)[number])
+  return Number.isSafeInteger(minutes) && minutes > 0 && minutes <= packageMarketExpireMaxMinutes
     ? minutes
     : getPackageMarketExpireMinutes()
 }

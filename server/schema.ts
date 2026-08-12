@@ -1139,6 +1139,8 @@ create table if not exists project_package_events (
   assigned_by_user_id bigint references users(id) on delete set null,
   assigned_at timestamptz,
   delivery_date date not null default current_date,
+  delivery_start_at timestamptz not null default (current_date::timestamp at time zone 'Asia/Shanghai'),
+  delivery_end_at timestamptz not null default ((current_date::timestamp + interval '1 day' - interval '1 second') at time zone 'Asia/Shanghai'),
   published_at timestamptz,
   published_by_user_id bigint references users(id) on delete set null,
   created_at timestamptz not null default now(),
@@ -1182,6 +1184,22 @@ alter table project_package_events
   add column if not exists delivery_date date not null default current_date;
 
 alter table project_package_events
+  add column if not exists delivery_start_at timestamptz,
+  add column if not exists delivery_end_at timestamptz;
+
+update project_package_events
+set delivery_start_at = (delivery_date::timestamp at time zone 'Asia/Shanghai'),
+    delivery_end_at = ((delivery_date::timestamp + interval '1 day' - interval '1 second') at time zone 'Asia/Shanghai')
+where delivery_start_at is null
+   or delivery_end_at is null;
+
+alter table project_package_events
+  alter column delivery_start_at set default (current_date::timestamp at time zone 'Asia/Shanghai'),
+  alter column delivery_end_at set default ((current_date::timestamp + interval '1 day' - interval '1 second') at time zone 'Asia/Shanghai'),
+  alter column delivery_start_at set not null,
+  alter column delivery_end_at set not null;
+
+alter table project_package_events
   add column if not exists published_at timestamptz,
   add column if not exists published_by_user_id bigint references users(id) on delete set null;
 
@@ -1209,6 +1227,20 @@ begin
         (published_at is null and status = 'draft')
         or (published_at is not null and status in ('delivering', 'delivered'))
       );
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'project_package_events_delivery_window_check'
+      and conrelid = 'project_package_events'::regclass
+  ) then
+    alter table project_package_events
+      add constraint project_package_events_delivery_window_check
+      check (delivery_start_at < delivery_end_at);
   end if;
 end $$;
 

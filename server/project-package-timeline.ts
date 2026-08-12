@@ -104,6 +104,8 @@ export type ProjectPackageEvent = {
   comments: ProjectPackageEventComment[]
   createdAt: string
   deliveryDate: string
+  deliveryEndAt: string
+  deliveryStartAt: string
   groups: ProjectPackageGroup[]
   id: number
   operations: ProjectPackageOperation[]
@@ -131,6 +133,8 @@ type EventRow = {
   assigner_email: string | null
   created_at: Date
   delivery_date: Date | string | null
+  delivery_end_at: Date
+  delivery_start_at: Date
   id: string
   published_at: Date | null
   published_by_user_id: string | null
@@ -299,6 +303,52 @@ function normalizeDeliveryDate(value: unknown) {
     throw new ProjectPackageEventError('Delivery date is invalid', 400)
   }
   return rawDate
+}
+
+function parseDeliveryDateTime(value: unknown, label: string) {
+  const rawValue = String(value ?? '').trim()
+  const match = rawValue.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?$/,
+  )
+  if (!match) {
+    throw new ProjectPackageEventError(`${label} must use YYYY-MM-DDTHH:mm`, 400)
+  }
+  const [, year, month, day, hour, minute, second = '00'] = match
+  const normalized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:${second}+08:00`
+  const date = new Date(normalized)
+  const expectedLocalValue = `${normalized.slice(0, 10)} ${normalized.slice(11, 19)}`
+  if (Number.isNaN(date.getTime()) || formatDateTime(date) !== expectedLocalValue) {
+    throw new ProjectPackageEventError(`${label} is invalid`, 400)
+  }
+  return date
+}
+
+function normalizeDeliveryWindow(params: {
+  deliveryDate?: string
+  deliveryEndAt?: string
+  deliveryStartAt?: string
+}) {
+  let startAt: Date
+  let endAt: Date
+  if (params.deliveryStartAt != null || params.deliveryEndAt != null) {
+    if (params.deliveryStartAt == null || params.deliveryEndAt == null) {
+      throw new ProjectPackageEventError('Delivery start and end times are both required', 400)
+    }
+    startAt = parseDeliveryDateTime(params.deliveryStartAt, 'Delivery start time')
+    endAt = parseDeliveryDateTime(params.deliveryEndAt, 'Expected delivery completion time')
+  } else {
+    const deliveryDate = normalizeDeliveryDate(params.deliveryDate)
+    startAt = parseDeliveryDateTime(`${deliveryDate}T00:00`, 'Delivery start time')
+    endAt = parseDeliveryDateTime(`${deliveryDate}T23:59:59`, 'Expected delivery completion time')
+  }
+  if (startAt >= endAt) {
+    throw new ProjectPackageEventError('Delivery start time must be earlier than expected completion time', 400)
+  }
+  return {
+    deliveryDate: formatDate(endAt),
+    deliveryEndAt: endAt,
+    deliveryStartAt: startAt,
+  }
 }
 
 function displayUserName(row?: { display_name?: string | null; email?: string | null } | null) {
@@ -1139,6 +1189,7 @@ function buildProjectPackageEventMarkdown(
     `### ${textValue(event.title, '未命名事件')}`,
     '',
     `- 交付人：${textValue(event.assigneeName, '未指派')}`,
+    `- 交付时间：${event.deliveryStartAt} ~ ${event.deliveryEndAt}`,
     '',
     '### 1. 操作文档',
     '',
@@ -1209,6 +1260,8 @@ export async function getProjectPackageTimeline(projectId: number) {
              e.assigned_by_user_id,
              e.assigned_at,
              e.delivery_date,
+             e.delivery_start_at,
+             e.delivery_end_at,
              e.published_at,
              e.published_by_user_id,
              e.created_at,
@@ -1477,6 +1530,8 @@ export async function getProjectPackageTimeline(projectId: number) {
       title: decryptText(row.title),
       createdAt: formatDateTime(row.created_at),
       deliveryDate: row.delivery_date ? formatDate(row.delivery_date) : formatDate(row.created_at),
+      deliveryEndAt: formatDateTime(row.delivery_end_at),
+      deliveryStartAt: formatDateTime(row.delivery_start_at),
       updatedAt: formatDateTime(row.updated_at),
       operations: eventOperationsByEvent.get(Number(row.id)) ?? [],
       groups: groupsByEvent.get(Number(row.id)) ?? [],
@@ -1490,7 +1545,9 @@ export async function saveProjectPackageEvent(params: {
   assignedByUserId: number
   assigneeUserId: number
   createdByUserId: number
-  deliveryDate: string
+  deliveryDate?: string
+  deliveryEndAt?: string
+  deliveryStartAt?: string
   documents: ProjectPackageDocumentInput[]
   eventId?: number
   items: ProjectPackageItemInput[]
@@ -1500,7 +1557,7 @@ export async function saveProjectPackageEvent(params: {
 }) {
   const title = normalizeText(params.title, 120)
   if (!title) throw new ProjectPackageEventError('Event title is required', 400)
-  const deliveryDate = normalizeDeliveryDate(params.deliveryDate)
+  const deliveryWindow = normalizeDeliveryWindow(params)
   const items = params.items.length > 0 ? normalizeProjectPackageItems(params.items) : []
   const duplicateObjectKeys = items.filter(
     (item, index) => items.findIndex((candidate) => candidate.objectKey === item.objectKey) !== index,
@@ -1536,9 +1593,11 @@ export async function saveProjectPackageEvent(params: {
             assignee_user_id = $3,
             assigned_by_user_id = $4,
             delivery_date = $5::date,
+            delivery_start_at = $6::timestamptz,
+            delivery_end_at = $7::timestamptz,
             updated_at = now()
-        where id = $6
-          and project_id = $7
+        where id = $8
+          and project_id = $9
           and published_at is null
         `,
         [
@@ -1546,7 +1605,9 @@ export async function saveProjectPackageEvent(params: {
           encryptText(title),
           params.assigneeUserId,
           params.assignedByUserId,
-          deliveryDate,
+          deliveryWindow.deliveryDate,
+          deliveryWindow.deliveryStartAt,
+          deliveryWindow.deliveryEndAt,
           eventId,
           params.projectId,
         ],
@@ -1565,9 +1626,11 @@ export async function saveProjectPackageEvent(params: {
           created_by_user_id,
           assignee_user_id,
           assigned_by_user_id,
-          delivery_date
+          delivery_date,
+          delivery_start_at,
+          delivery_end_at
         )
-        values ($1, $2, 'draft', $3, $4, $5, $6, $7::date)
+        values ($1, $2, 'draft', $3, $4, $5, $6, $7::date, $8::timestamptz, $9::timestamptz)
         returning id
         `,
         [
@@ -1577,7 +1640,9 @@ export async function saveProjectPackageEvent(params: {
           params.createdByUserId,
           params.assigneeUserId,
           params.assignedByUserId,
-          deliveryDate,
+          deliveryWindow.deliveryDate,
+          deliveryWindow.deliveryStartAt,
+          deliveryWindow.deliveryEndAt,
         ],
       )
       eventId = Number(created.rows[0].id)
@@ -1719,14 +1784,16 @@ export async function createProjectPackageEvent(params: {
   assignedByUserId?: number | null
   assigneeUserId?: number | null
   createdByUserId: number
-  deliveryDate: string
+  deliveryDate?: string
+  deliveryEndAt?: string
+  deliveryStartAt?: string
   projectId: number
   title: string
   type: ProjectPackageEventType
 }) {
   const title = normalizeText(params.title, 120)
   if (!title) throw new Error('Event title is required')
-  const deliveryDate = normalizeDeliveryDate(params.deliveryDate)
+  const deliveryWindow = normalizeDeliveryWindow(params)
 
   const result = await query<{ id: string }>(
     `
@@ -1738,9 +1805,11 @@ export async function createProjectPackageEvent(params: {
       assignee_user_id,
       assigned_by_user_id,
       assigned_at,
-      delivery_date
+      delivery_date,
+      delivery_start_at,
+      delivery_end_at
     )
-    values ($1, $2, $3, $4, $5, $6, case when $5::bigint is null then null else now() end, $7::date)
+    values ($1, $2, $3, $4, $5, $6, case when $5::bigint is null then null else now() end, $7::date, $8::timestamptz, $9::timestamptz)
     returning id
     `,
     [
@@ -1750,7 +1819,9 @@ export async function createProjectPackageEvent(params: {
       params.createdByUserId,
       params.assigneeUserId ?? null,
       params.assigneeUserId ? (params.assignedByUserId ?? params.createdByUserId) : null,
-      deliveryDate,
+      deliveryWindow.deliveryDate,
+      deliveryWindow.deliveryStartAt,
+      deliveryWindow.deliveryEndAt,
     ],
   )
   return Number(result.rows[0].id)
@@ -1762,6 +1833,8 @@ export async function updateProjectPackageEvent(params: {
   client?: PoolClient
   eventId: number
   deliveryDate?: string
+  deliveryEndAt?: string
+  deliveryStartAt?: string
   projectId: number
   status?: ProjectPackageEventStatus
   title?: string
@@ -1779,9 +1852,14 @@ export async function updateProjectPackageEvent(params: {
     values.push(params.type)
     updates.push(`type = $${values.length}`)
   }
-  if (params.deliveryDate != null) {
-    values.push(normalizeDeliveryDate(params.deliveryDate))
+  if (params.deliveryDate != null || params.deliveryStartAt != null || params.deliveryEndAt != null) {
+    const deliveryWindow = normalizeDeliveryWindow(params)
+    values.push(deliveryWindow.deliveryDate)
     updates.push(`delivery_date = $${values.length}::date`)
+    values.push(deliveryWindow.deliveryStartAt)
+    updates.push(`delivery_start_at = $${values.length}::timestamptz`)
+    values.push(deliveryWindow.deliveryEndAt)
+    updates.push(`delivery_end_at = $${values.length}::timestamptz`)
   }
   if (params.status != null) {
     values.push(ensureProjectPackageEventStatus(params.status))

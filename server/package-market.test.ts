@@ -5,7 +5,16 @@ import {
   isAllowedPackageMarketObjectKey,
   listPackageMarketRules,
   normalizeOssEndpoint,
+  normalizePackageMarketExpireMinutes,
 } from './package-market.ts'
+
+test('accepts custom package link validity in minutes within the bounded range', () => {
+  const defaultMinutes = normalizePackageMarketExpireMinutes(undefined)
+  assert.equal(normalizePackageMarketExpireMinutes(24 * 60), 24 * 60)
+  assert.equal(normalizePackageMarketExpireMinutes(365 * 24 * 60), 365 * 24 * 60)
+  assert.equal(normalizePackageMarketExpireMinutes(0), defaultMinutes)
+  assert.equal(normalizePackageMarketExpireMinutes(365 * 24 * 60 + 1), defaultMinutes)
+})
 
 test('formats package market timestamps in Shanghai time', () => {
   assert.equal(

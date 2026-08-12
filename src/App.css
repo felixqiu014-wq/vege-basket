@@ -9084,6 +9084,16 @@ textarea:focus {
   max-width: 360px;
 }
 
+.package-market-expire-custom {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.package-market-expire-custom label {
+  width: 88px;
+}
+
 .package-cart-strip {
   padding-top: 14px;
   border-top: 1px solid var(--line);

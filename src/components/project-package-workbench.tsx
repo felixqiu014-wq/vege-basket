@@ -30,7 +30,6 @@ import {
 } from '@phosphor-icons/react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { JournalDatePicker } from '@/components/journal-date-picker'
 import { MentionTextarea, type MentionMember } from '@/components/mention-textarea'
 import {
   Dialog,
@@ -268,16 +267,106 @@ function eventDisplayStatus(event: ProjectPackageEvent): ProjectPackageEventStat
   return event.status === 'delivered' ? 'delivered' : 'delivering'
 }
 
-function getTodayDateStamp() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
+function getShanghaiDateTimeLocalStamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
     day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+    hour12: false,
+    minute: '2-digit',
     month: '2-digit',
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
-  }).formatToParts(new Date())
+  }).formatToParts(date)
   const pick = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? ''
-  return `${pick('year')}-${pick('month')}-${pick('day')}`
+  return `${pick('year')}-${pick('month')}-${pick('day')}T${pick('hour')}:${pick('minute')}`
+}
+
+function normalizeDateTimeLocalStamp(value: string | undefined, fallback = '') {
+  const match = String(value ?? '').trim().match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[T ](\d{1,2}):(\d{2})(?::\d{2})?$/,
+  )
+  if (!match) return fallback
+  const [, year, month, day, hour, minute] = match
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}`
+}
+
+function dateTimeLocalToUtcTimestamp(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
+  if (!match) return Number.NaN
+  const [, year, month, day, hour, minute] = match
+  const timestamp = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute))
+  const date = new Date(timestamp)
+  return date.getUTCFullYear() === Number(year) &&
+      date.getUTCMonth() === Number(month) - 1 &&
+      date.getUTCDate() === Number(day) &&
+      date.getUTCHours() === Number(hour) &&
+      date.getUTCMinutes() === Number(minute)
+    ? timestamp
+    : Number.NaN
+}
+
+function addDateTimeLocalHours(value: string, hours: number) {
+  const timestamp = dateTimeLocalToUtcTimestamp(value)
+  if (Number.isNaN(timestamp)) return value
+  const date = new Date(timestamp + hours * 60 * 60 * 1000)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+    hour12: false,
+    minute: '2-digit',
+    month: '2-digit',
+    timeZone: 'UTC',
+    year: 'numeric',
+  }).formatToParts(date)
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? ''
+  return `${pick('year')}-${pick('month')}-${pick('day')}T${pick('hour')}:${pick('minute')}`
+}
+
+function dateTimeLocalDateStamp(value: string) {
+  return normalizeDateTimeLocalStamp(value).slice(0, 10)
+}
+
+function getEventDeliveryStartAt(event: ProjectPackageEvent) {
+  return normalizeDateTimeLocalStamp(event.deliveryStartAt, `${getEventDeliveryDate(event)}T00:00`)
+}
+
+function getEventDeliveryEndAt(event: ProjectPackageEvent) {
+  return normalizeDateTimeLocalStamp(event.deliveryEndAt, `${getEventDeliveryDate(event)}T23:59`)
+}
+
+function formatEventDeliveryWindow(event: ProjectPackageEvent) {
+  return formatDateTimeLocalWindow(getEventDeliveryStartAt(event), getEventDeliveryEndAt(event))
+}
+
+function formatDateTimeLocalWindow(startAt: string, endAt: string) {
+  const formattedStartAt = startAt.replace('T', ' ')
+  const formattedEndAt = endAt.replace('T', ' ')
+  return `${formattedStartAt} ~ ${formattedEndAt}`
+}
+
+function getExpireMinutesUntil(value: string) {
+  const remaining = Math.ceil(
+    (dateTimeLocalToUtcTimestamp(value) -
+      dateTimeLocalToUtcTimestamp(getShanghaiDateTimeLocalStamp())) /
+      60000,
+  )
+  return Number.isFinite(remaining)
+    ? Math.min(packageMarketExpireMaxMinutes, Math.max(1, remaining))
+    : 1
+}
+
+function formatExpireDuration(minutes: number) {
+  const days = Math.floor(minutes / (24 * 60))
+  const hours = Math.floor((minutes % (24 * 60)) / 60)
+  const parts = []
+  if (days > 0) parts.push(`${days} 天`)
+  if (hours > 0) parts.push(`${hours} 小时`)
+  if (parts.length === 0) parts.push('不足 1 小时')
+  return parts.join(' ')
 }
 
 function getEventDeliveryDate(event: ProjectPackageEvent) {
@@ -296,6 +385,8 @@ const packageMarketExpireOptions = [
   { label: '5 小时', value: 300 },
   { label: '10 小时', value: 600 },
 ]
+
+const packageMarketExpireMaxMinutes = 365 * 24 * 60
 
 function isOperationEffectivelyCompleted(
   operation: ProjectPackageOperation,
@@ -1263,7 +1354,10 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [documentTodoFilterConditions, setDocumentTodoFilterConditions] = useState<TodoFilterCondition[]>([])
   const [, setEventEditorReady] = useState(false)
   const [eventAssigneeUserId, setEventAssigneeUserId] = useState('')
-  const [eventDeliveryDate, setEventDeliveryDate] = useState(getTodayDateStamp)
+  const [eventDeliveryStartAt, setEventDeliveryStartAt] = useState(() => getShanghaiDateTimeLocalStamp())
+  const [eventDeliveryEndAt, setEventDeliveryEndAt] = useState(() =>
+    addDateTimeLocalHours(getShanghaiDateTimeLocalStamp(), 24),
+  )
   const [eventTitle, setEventTitle] = useState('')
   const [eventType, setEventType] = useState<ProjectPackageEventType>('upgrade')
   const [eventFilterDialogOpen, setEventFilterDialogOpen] = useState(false)
@@ -1295,6 +1389,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [marketOpen, setMarketOpen] = useState(false)
   const [marketRules, setMarketRules] = useState<PackageMarketRule[]>([])
   const [marketExpireMinutes, setMarketExpireMinutes] = useState(packageMarketExpireOptions[0].value)
+  const [marketExpireMode, setMarketExpireMode] = useState<'delivery-end' | 'custom'>('delivery-end')
+  const [marketExpireDays, setMarketExpireDays] = useState('1')
+  const [marketExpireHours, setMarketExpireHours] = useState('0')
   const [marketSelectedPackage, setMarketSelectedPackage] = useState('base-pro')
   const [marketChannel, setMarketChannel] = useState<PackageMarketChannel>('release')
   const [marketArch, setMarketArch] = useState<'amd64' | 'arm64'>('amd64')
@@ -1573,7 +1670,11 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     })
   }, [documentTodoFilterConditions, documentTodoFilterJoin, documentTodoSearch, selectableTodos])
   const eventBasicInformationValid = Boolean(
-    eventTitle.trim() && eventDeliveryDate && Number(eventAssigneeUserId) > 0,
+    eventTitle.trim() &&
+      eventDeliveryStartAt &&
+      eventDeliveryEndAt &&
+      dateTimeLocalToUtcTimestamp(eventDeliveryEndAt) > dateTimeLocalToUtcTimestamp(eventDeliveryStartAt) &&
+      Number(eventAssigneeUserId) > 0,
   )
 
   function updatePackageDocument(
@@ -1764,11 +1865,12 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       const rulesPayload = await onLoadPackageMarketRules()
       if (requestId !== marketDetailRequestIdRef.current) return null
       setMarketRules(rulesPayload.rules)
-      const expireMinutes = packageMarketExpireOptions.some(
-        (option) => option.value === rulesPayload.expireMinutes,
-      )
-        ? rulesPayload.expireMinutes
-        : packageMarketExpireOptions[0].value
+      const expireMinutes = getExpireMinutesUntil(eventDeliveryEndAt)
+      const defaultDays = Math.floor(expireMinutes / (24 * 60))
+      const defaultHours = Math.floor((expireMinutes % (24 * 60)) / 60)
+      setMarketExpireMode('delivery-end')
+      setMarketExpireDays(String(defaultDays))
+      setMarketExpireHours(String(defaultHours))
       setMarketExpireMinutes(expireMinutes)
       return { expireMinutes, rules: rulesPayload.rules }
     } catch (error) {
@@ -1962,7 +2064,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     setEventEditorStep(1)
     setEventTitle('')
     setEventType(events.length === 0 ? 'init' : 'upgrade')
-    setEventDeliveryDate(getTodayDateStamp())
+    const startAt = getShanghaiDateTimeLocalStamp()
+    setEventDeliveryStartAt(startAt)
+    setEventDeliveryEndAt(addDateTimeLocalHours(startAt, 24))
     setEventAssigneeUserId(
       String(
         memberOptions.find((member) => member.id === currentUserId)?.id ??
@@ -2003,7 +2107,31 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
         expireMinutes: context.expireMinutes,
         marketRules: context.rules,
       })
-    })
+      })
+  }
+
+  function customMarketExpireMinutes(daysValue = marketExpireDays, hoursValue = marketExpireHours) {
+    const days = Number(daysValue)
+    const hours = Number(hoursValue)
+    if (
+      !Number.isInteger(days) ||
+      !Number.isInteger(hours) ||
+      days < 0 ||
+      hours < 0 ||
+      hours > 23
+    ) {
+      return null
+    }
+    const minutes = days * 24 * 60 + hours * 60
+    if (minutes < 1 || minutes > packageMarketExpireMaxMinutes) return null
+    return minutes
+  }
+
+  function refreshCustomMarketExpire(nextDays: string, nextHours: string) {
+    const nextMinutes = customMarketExpireMinutes(nextDays, nextHours)
+    if (nextMinutes == null) return
+    setMarketExpireMinutes(nextMinutes)
+    void refreshMarketDetail({ expireMinutes: nextMinutes })
   }
 
   function openDraftEventEditor(event: ProjectPackageEvent) {
@@ -2027,7 +2155,8 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     setSelectedEventId(event.id)
     setEventTitle(event.title)
     setEventType(event.type)
-    setEventDeliveryDate(getEventDeliveryDate(event))
+    setEventDeliveryStartAt(getEventDeliveryStartAt(event))
+    setEventDeliveryEndAt(getEventDeliveryEndAt(event))
     setEventAssigneeUserId(String(event.assigneeUserId ?? memberOptions[0]?.id ?? ''))
     setCartItems(event.groups.flatMap((group) => group.items.map((item) => ({
       arch: item.arch,
@@ -2197,7 +2326,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
 
   async function saveEvent(action: 'publish' | 'save_draft') {
     const assigneeUserId = Number(eventAssigneeUserId)
-    if (!eventTitle.trim() || !Number.isInteger(assigneeUserId) || assigneeUserId <= 0) return
+    if (!eventBasicInformationValid || !Number.isInteger(assigneeUserId) || assigneeUserId <= 0) return
     if (action === 'publish' && (!eventDocumentTitle.trim() || !eventDocumentContent.trim())) {
       setEventEditorStep(3)
       return
@@ -2219,7 +2348,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       const savedEvent = await onSaveEvent(eventEditorEventId, {
         action,
         assigneeUserId,
-        deliveryDate: eventDeliveryDate,
+        deliveryDate: dateTimeLocalDateStamp(eventDeliveryEndAt),
+        deliveryEndAt: eventDeliveryEndAt,
+        deliveryStartAt: eventDeliveryStartAt,
         documents: [{
           content: eventDocumentContent,
           relatedTodoIds: eventDocumentRelatedTodoIds,
@@ -2496,14 +2627,23 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                 />
               </Label>
               <Label>
-                交付时间
-                <JournalDatePicker
-                  ariaLabel="选择交付时间"
-                  className="package-event-date-trigger"
-                  datesWithEntries={[]}
-                  value={eventDeliveryDate}
-                  onChange={(value) => {
-                    setEventDeliveryDate(value)
+                交付开始时间
+                <Input
+                  type="datetime-local"
+                  value={eventDeliveryStartAt}
+                  onChange={(event) => {
+                    setEventDeliveryStartAt(event.target.value)
+                    setEventEditorDirty(true)
+                  }}
+                />
+              </Label>
+              <Label>
+                预期交付完成时间
+                <Input
+                  type="datetime-local"
+                  value={eventDeliveryEndAt}
+                  onChange={(event) => {
+                    setEventDeliveryEndAt(event.target.value)
                     setEventEditorDirty(true)
                   }}
                 />
@@ -2899,7 +3039,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                     onClick={() => selectEventFromList(event)}
                   >
                     <strong>{event.title}</strong>
-                    <span>{eventTypeLabel(event.type)} · {getEventDeliveryDate(event)}</span>
+                    <span>{eventTypeLabel(event.type)} · {formatEventDeliveryWindow(event)}</span>
                     <span className="project-event-badges">
                       <span className="project-event-assignee">
                         交付人：{event.assigneeName || '未指派'}
@@ -2959,7 +3099,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                 <div>
                   <span>草稿</span>
                   <h3>{selectedEvent.title}</h3>
-                  <p>{eventTypeLabel(selectedEvent.type)} · {getEventDeliveryDate(selectedEvent)} · {selectedEvent.assigneeName || '未指派'}</p>
+                  <p>{eventTypeLabel(selectedEvent.type)} · {formatEventDeliveryWindow(selectedEvent)} · {selectedEvent.assigneeName || '未指派'}</p>
                 </div>
                 {canManageProject ? (
                   <Button className="solid-button" onClick={() => openDraftEventEditor(selectedEvent)} type="button">
@@ -2982,7 +3122,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                     <div>
                       <h4>操作文档</h4>
                       <p className="operation-area-meta">
-                        {selectedEvent.title} · {eventTypeLabel(selectedEvent.type)} · {getEventDeliveryDate(selectedEvent)}
+                        {selectedEvent.title} · {eventTypeLabel(selectedEvent.type)} · {formatEventDeliveryWindow(selectedEvent)}
                         <span className="event-progress-pill">
                           已完成 {selectedEventProgress.completed}/{selectedEventProgress.total} 个子事件 - 完成进度：{selectedEventProgress.percent}%
                         </span>
@@ -3700,7 +3840,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
           <DialogHeader>
             <DialogTitle>安装包市场</DialogTitle>
             <DialogDescription>
-              为项目「{project.name}」当前事件选择安装包。临时下载链接有效期约 {marketExpireMinutes || '-'} 分钟。
+              为项目「{project.name}」当前事件选择安装包。当前链接有效期：{formatExpireDuration(marketExpireMinutes)}。
             </DialogDescription>
           </DialogHeader>
           <div className="package-market-grid">
@@ -3988,26 +4128,66 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                 <Label>
                   配置链接有效期
                   <Select
-                    value={String(marketExpireMinutes)}
+                    value={marketExpireMode}
                     onValueChange={(value) => {
-                      const nextExpireMinutes = Number(value)
-                      setMarketExpireMinutes(nextExpireMinutes)
-                      void refreshMarketDetail({ expireMinutes: nextExpireMinutes })
+                      const nextMode = value as 'delivery-end' | 'custom'
+                      setMarketExpireMode(nextMode)
+                      if (nextMode === 'delivery-end') {
+                        const nextExpireMinutes = getExpireMinutesUntil(eventDeliveryEndAt)
+                        setMarketExpireMinutes(nextExpireMinutes)
+                        void refreshMarketDetail({ expireMinutes: nextExpireMinutes })
+                      } else {
+                        refreshCustomMarketExpire(marketExpireDays, marketExpireHours)
+                      }
                     }}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {packageMarketExpireOptions.map((option) => (
-                        <SelectItem key={option.value} value={String(option.value)}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="delivery-end">至预期交付完成时间（{formatDateTimeLocalWindow(
+                        eventDeliveryStartAt,
+                        eventDeliveryEndAt,
+                      )}）</SelectItem>
+                      <SelectItem value="custom">自定义时长</SelectItem>
                     </SelectContent>
                   </Select>
                 </Label>
-                <small>影响当前弹窗内“查看临时链接”和“复制下载链接”的有效期。</small>
+                {marketExpireMode === 'custom' ? (
+                  <div className="package-market-expire-custom">
+                    <Label>
+                      天
+                      <Input
+                        min="0"
+                        max="365"
+                        step="1"
+                        type="number"
+                        value={marketExpireDays}
+                        onChange={(event) => {
+                          const nextDays = event.target.value
+                          setMarketExpireDays(nextDays)
+                          refreshCustomMarketExpire(nextDays, marketExpireHours)
+                        }}
+                      />
+                    </Label>
+                    <Label>
+                      时
+                      <Input
+                        min="0"
+                        max="23"
+                        step="1"
+                        type="number"
+                        value={marketExpireHours}
+                        onChange={(event) => {
+                          const nextHours = event.target.value
+                          setMarketExpireHours(nextHours)
+                          refreshCustomMarketExpire(marketExpireDays, nextHours)
+                        }}
+                      />
+                    </Label>
+                  </div>
+                ) : null}
+                <small>影响当前弹窗内“查看临时链接”和“复制下载链接”的有效期。自定义时长至少 1 小时，最长 365 天。</small>
               </div>
             </div>
           </div>

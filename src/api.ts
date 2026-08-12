@@ -1365,6 +1365,8 @@ export function updateProjectPackageEvent(
   payload: Partial<{
     assigneeUserId: number
     deliveryDate: string
+    deliveryEndAt: string
+    deliveryStartAt: string
     status: ProjectPackageEventStatus
     title: string
     type: ProjectPackageEventType

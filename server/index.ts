@@ -10883,6 +10883,8 @@ app.post('/api/projects/:projectId/package-timeline/events', asyncHandler(async 
     assignedByUserId: userId,
     createdByUserId: userId,
     deliveryDate: String(request.body.deliveryDate ?? ''),
+    deliveryEndAt: request.body.deliveryEndAt ? String(request.body.deliveryEndAt) : undefined,
+    deliveryStartAt: request.body.deliveryStartAt ? String(request.body.deliveryStartAt) : undefined,
     documents: aggregate.documents,
     items: aggregate.items,
     projectId,
@@ -10924,6 +10926,8 @@ app.put('/api/projects/:projectId/package-timeline/events/:eventId', asyncHandle
     assigneeUserId,
     createdByUserId: userId,
     deliveryDate: String(request.body.deliveryDate ?? ''),
+    deliveryEndAt: request.body.deliveryEndAt ? String(request.body.deliveryEndAt) : undefined,
+    deliveryStartAt: request.body.deliveryStartAt ? String(request.body.deliveryStartAt) : undefined,
     documents: aggregate.documents,
     eventId: Number(request.params.eventId),
     items: aggregate.items,
@@ -11067,6 +11071,8 @@ app.patch('/api/projects/:projectId/package-timeline/events/:eventId', asyncHand
         }
       : {}),
     deliveryDate: 'deliveryDate' in request.body ? String(request.body.deliveryDate ?? '') : undefined,
+    deliveryEndAt: 'deliveryEndAt' in request.body ? String(request.body.deliveryEndAt ?? '') : undefined,
+    deliveryStartAt: 'deliveryStartAt' in request.body ? String(request.body.deliveryStartAt ?? '') : undefined,
     title: 'title' in request.body ? String(request.body.title ?? '') : undefined,
     type: 'type' in request.body ? ensureProjectPackageEventType(request.body.type) : undefined,
   })
