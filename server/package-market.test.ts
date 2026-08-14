@@ -8,6 +8,7 @@ import {
   matchesPackageMarketReleaseFileName,
   normalizeOssEndpoint,
   normalizePackageMarketExpireMinutes,
+  resolvePackageMarketAppRuleId,
 } from './package-market.ts'
 
 test('accepts custom package link validity in minutes within the bounded range', () => {
@@ -16,6 +17,12 @@ test('accepts custom package link validity in minutes within the bounded range',
   assert.equal(normalizePackageMarketExpireMinutes(365 * 24 * 60), 365 * 24 * 60)
   assert.equal(normalizePackageMarketExpireMinutes(0), defaultMinutes)
   assert.equal(normalizePackageMarketExpireMinutes(365 * 24 * 60 + 1), defaultMinutes)
+})
+
+test('keeps base package ids while resolving their reads through apps rules', () => {
+  assert.equal(resolvePackageMarketAppRuleId('base-pro'), 'sealos-pro')
+  assert.equal(resolvePackageMarketAppRuleId('base-oss'), 'sealos-oss')
+  assert.equal(resolvePackageMarketAppRuleId('offline-center'), '')
 })
 
 test('formats package market timestamps in Shanghai time', () => {

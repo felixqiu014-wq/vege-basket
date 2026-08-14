@@ -125,6 +125,7 @@ type PackageWorkbenchProps = {
     channel: PackageMarketChannel
     ciBranch?: string
     ciVersion?: string
+    deployType?: 'pro' | 'oss'
     expireMinutes?: number
     includeAll?: boolean
     packageId: string
@@ -140,6 +141,7 @@ type PackageWorkbenchProps = {
     arch: string
     ciBranch?: string
     kind: 'ci' | 'release'
+    deployType?: 'pro' | 'oss'
     includeAll?: boolean
     packageId: string
   }) => Promise<PackageMarketVersion[]>
@@ -506,6 +508,31 @@ function packageMarketSearchMeta(value: string) {
   return value.trim().toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ')
 }
 
+function getPackageMarketBaseRules(): PackageMarketRule[] {
+  return [
+    {
+      id: 'base-pro',
+      name: 'sealos-pro',
+      category: 'apps',
+      mode: 'release',
+      releaseRoots: [],
+      flatFileRoots: [],
+      fileNameFormats: [],
+      ciFileNameFormats: [],
+    },
+    {
+      id: 'base-oss',
+      name: 'sealos-oss',
+      category: 'apps',
+      mode: 'release',
+      releaseRoots: [],
+      flatFileRoots: [],
+      fileNameFormats: [],
+      ciFileNameFormats: [],
+    },
+  ]
+}
+
 function PackageMarketRuleList({ children }: { children: ReactNode }) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [scrollbar, setScrollbar] = useState({ height: 0, scrollable: false, top: 0, value: 0 })
@@ -615,7 +642,7 @@ export function PackageMarketBrowser({
   const [copiedValue, setCopiedValue] = useState('')
   const [marketRules, setMarketRules] = useState<PackageMarketRule[]>([])
   const [marketExpireMinutes, setMarketExpireMinutes] = useState(packageMarketExpireOptions[0].value)
-  const [marketSelectedPackage, setMarketSelectedPackage] = useState('')
+  const [marketSelectedPackage, setMarketSelectedPackage] = useState('base-pro')
   const [marketChannel, setMarketChannel] = useState<PackageMarketChannel>('release')
   const [marketArch, setMarketArch] = useState<'amd64' | 'arm64'>('amd64')
   const [marketSearch, setMarketSearch] = useState('')
@@ -631,7 +658,8 @@ export function PackageMarketBrowser({
   const [marketDependencyDetails, setMarketDependencyDetails] = useState<PackageMarketDependencyState[]>([])
   const [marketLoading, setMarketLoading] = useState(false)
   const [marketError, setMarketError] = useState('')
-  const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<'apps' | 'middleware', boolean>>({
+  const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<'base' | 'apps' | 'middleware', boolean>>({
+    base: true,
     apps: true,
     middleware: true,
   })
@@ -653,16 +681,20 @@ export function PackageMarketBrowser({
 
   const filteredRules = useMemo(() => {
     const query = packageMarketSearchMeta(marketSearch)
-    return marketRules.filter((rule) => {
+    const baseRules = [...getPackageMarketBaseRules(), ...marketRules]
+    return baseRules.filter((rule) => {
       if (!query) return true
       return packageMarketSearchMeta(`${rule.id} ${rule.name}`).includes(query)
     })
   }, [marketRules, marketSearch])
 
   const groupedMarketRules = useMemo(() => {
-    const apps = filteredRules.filter((rule) => rule.category === 'apps')
+    const base = filteredRules.filter((rule) => rule.id === 'base-pro' || rule.id === 'base-oss')
+    const apps = filteredRules.filter(
+      (rule) => rule.category === 'apps' && rule.id !== 'base-pro' && rule.id !== 'base-oss',
+    )
     const middleware = filteredRules.filter((rule) => rule.category === 'middleware')
-    return { apps, middleware }
+    return { apps, base, middleware }
   }, [filteredRules])
 
   const selectedMarketDependencyRules = useMemo(
@@ -817,6 +849,7 @@ export function PackageMarketBrowser({
           : onLoadPackageMarketVersions({
               arch,
               kind: 'release',
+              deployType: packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
               includeAll,
               packageId,
             }),
@@ -825,6 +858,7 @@ export function PackageMarketBrowser({
           channel,
           arch,
           ciBranch,
+          deployType: packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
           expireMinutes,
           includeAll,
           releaseVersion,
@@ -945,13 +979,6 @@ export function PackageMarketBrowser({
       .then((rulesPayload) => {
         if (requestId !== marketDetailRequestIdRef.current) return
         setMarketRules(rulesPayload.rules)
-        const initialRule = rulesPayload.rules.find((rule) => rule.category === 'apps') ??
-          rulesPayload.rules[0]
-        if (!initialRule) {
-          setMarketLoading(false)
-          return
-        }
-        setMarketSelectedPackage(initialRule.id)
         const expireMinutes = packageMarketExpireOptions.some(
           (option) => option.value === rulesPayload.expireMinutes,
         )
@@ -961,7 +988,6 @@ export function PackageMarketBrowser({
         void refreshMarketDetailRef.current({
           expireMinutes,
           marketRules: rulesPayload.rules,
-          packageId: initialRule.id,
         })
       })
       .catch((error) => {
@@ -1001,10 +1027,11 @@ export function PackageMarketBrowser({
             <PackageMarketRuleList>
               {(
                 [
+                  { id: 'base' as const, label: '基础包', rules: groupedMarketRules.base },
                   { id: 'apps' as const, label: 'APPS', rules: groupedMarketRules.apps },
                   { id: 'middleware' as const, label: 'SEALOS-PRO 中间件', rules: groupedMarketRules.middleware },
                 ] satisfies Array<{
-                  id: 'apps' | 'middleware'
+                  id: 'base' | 'apps' | 'middleware'
                   label: string
                   rules: PackageMarketRule[]
                 }>
@@ -1041,7 +1068,10 @@ export function PackageMarketBrowser({
                             type="button"
                             className={rule.id === marketSelectedPackage ? 'package-market-rule active' : 'package-market-rule'}
                             onClick={() => {
-                              const nextChannel = marketChannel
+                              const nextChannel =
+                                rule.id === 'base-pro' || rule.id === 'base-oss'
+                                  ? 'release'
+                                  : marketChannel
                               setMarketSelectedPackage(rule.id)
                               setMarketChannel(nextChannel)
                               setMarketReleaseVersion('')
@@ -1087,7 +1117,9 @@ export function PackageMarketBrowser({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="release">正式包</SelectItem>
-                    <SelectItem value="ci">测试包</SelectItem>
+                    {marketSelectedPackage !== 'base-pro' && marketSelectedPackage !== 'base-oss' ? (
+                      <SelectItem value="ci">测试包</SelectItem>
+                    ) : null}
                   </SelectContent>
                 </Select>
               </Label>
@@ -1483,7 +1515,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [marketExpireMode, setMarketExpireMode] = useState<'delivery-end' | 'custom'>('delivery-end')
   const [marketExpireDays, setMarketExpireDays] = useState('1')
   const [marketExpireHours, setMarketExpireHours] = useState('0')
-  const [marketSelectedPackage, setMarketSelectedPackage] = useState('')
+  const [marketSelectedPackage, setMarketSelectedPackage] = useState('base-pro')
   const [marketChannel, setMarketChannel] = useState<PackageMarketChannel>('release')
   const [marketArch, setMarketArch] = useState<'amd64' | 'arm64'>('amd64')
   const [marketSearch, setMarketSearch] = useState('')
@@ -1499,7 +1531,8 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [marketDependencyDetails, setMarketDependencyDetails] = useState<PackageMarketDependencyState[]>([])
   const [marketLoading, setMarketLoading] = useState(false)
   const [marketError, setMarketError] = useState('')
-  const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<'apps' | 'middleware', boolean>>({
+  const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<'base' | 'apps' | 'middleware', boolean>>({
+    base: true,
     apps: true,
     middleware: true,
   })
@@ -1846,16 +1879,23 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
 
   const filteredRules = useMemo(() => {
     const query = packageMarketSearchMeta(marketSearch)
-    return marketRules.filter((rule) => {
+    const baseRules: PackageMarketRule[] = [
+      ...getPackageMarketBaseRules(),
+      ...marketRules,
+    ]
+    return baseRules.filter((rule) => {
       if (!query) return true
       return packageMarketSearchMeta(`${rule.id} ${rule.name}`).includes(query)
     })
   }, [marketRules, marketSearch])
 
   const groupedMarketRules = useMemo(() => {
-    const apps = filteredRules.filter((rule) => rule.category === 'apps')
+    const base = filteredRules.filter((rule) => rule.id === 'base-pro' || rule.id === 'base-oss')
+    const apps = filteredRules.filter(
+      (rule) => rule.category === 'apps' && rule.id !== 'base-pro' && rule.id !== 'base-oss',
+    )
     const middleware = filteredRules.filter((rule) => rule.category === 'middleware')
-    return { apps, middleware }
+    return { apps, base, middleware }
   }, [filteredRules])
   const selectedMarketDependencyRules = useMemo(
     () => marketRules.filter((rule) => rule.category === 'dependency' && rule.parent === marketSelectedPackage),
@@ -1965,11 +2005,6 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       const rulesPayload = await onLoadPackageMarketRules()
       if (requestId !== marketDetailRequestIdRef.current) return null
       setMarketRules(rulesPayload.rules)
-      const initialRule = rulesPayload.rules.find((rule) => rule.id === marketSelectedPackage) ??
-        rulesPayload.rules.find((rule) => rule.category === 'apps') ??
-        rulesPayload.rules[0]
-      if (!initialRule) return null
-      setMarketSelectedPackage(initialRule.id)
       const expireMinutes = getExpireMinutesUntil(eventDeliveryEndAt)
       const defaultDays = Math.floor(expireMinutes / (24 * 60))
       const defaultHours = Math.floor((expireMinutes % (24 * 60)) / 60)
@@ -1977,7 +2012,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       setMarketExpireDays(String(defaultDays))
       setMarketExpireHours(String(defaultHours))
       setMarketExpireMinutes(expireMinutes)
-      return { expireMinutes, rules: rulesPayload.rules, packageId: initialRule.id }
+      return { expireMinutes, rules: rulesPayload.rules }
     } catch (error) {
       if (requestId !== marketDetailRequestIdRef.current) return null
       setMarketError(error instanceof Error ? error.message : '包市场读取失败')
@@ -2119,6 +2154,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
           : onLoadPackageMarketVersions({
               arch,
               kind: 'release',
+              deployType: packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
               includeAll,
               packageId,
             }),
@@ -2127,6 +2163,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
           channel,
           arch,
           ciBranch,
+          deployType: packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
           expireMinutes,
           includeAll,
           releaseVersion,
@@ -2217,7 +2254,6 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       void refreshMarketDetail({
         expireMinutes: context.expireMinutes,
         marketRules: context.rules,
-        packageId: context.packageId,
       })
       })
   }
@@ -4012,11 +4048,12 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
             </Button>
               <PackageMarketRuleList>
                 {(
-                  [
-                    { id: 'apps' as const, label: 'APPS', rules: groupedMarketRules.apps },
-                    { id: 'middleware' as const, label: 'SEALOS-PRO 中间件', rules: groupedMarketRules.middleware },
-                  ] satisfies Array<{
-                    id: 'apps' | 'middleware'
+                [
+                  { id: 'base' as const, label: '基础包', rules: groupedMarketRules.base },
+                  { id: 'apps' as const, label: 'APPS', rules: groupedMarketRules.apps },
+                  { id: 'middleware' as const, label: 'SEALOS-PRO 中间件', rules: groupedMarketRules.middleware },
+                ] satisfies Array<{
+                  id: 'base' | 'apps' | 'middleware'
                     label: string
                     rules: PackageMarketRule[]
                   }>
@@ -4053,7 +4090,10 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                               type="button"
                               className={rule.id === marketSelectedPackage ? 'package-market-rule active' : 'package-market-rule'}
                               onClick={() => {
-                                const nextChannel = marketChannel
+                                const nextChannel =
+                                  rule.id === 'base-pro' || rule.id === 'base-oss'
+                                    ? 'release'
+                                    : marketChannel
                                 setMarketSelectedPackage(rule.id)
                                 setMarketChannel(nextChannel)
                                 setMarketReleaseVersion('')
@@ -4099,7 +4139,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="release">正式包</SelectItem>
-                      <SelectItem value="ci">测试包</SelectItem>
+                      {marketSelectedPackage !== 'base-pro' && marketSelectedPackage !== 'base-oss' ? (
+                        <SelectItem value="ci">测试包</SelectItem>
+                      ) : null}
                     </SelectContent>
                   </Select>
                 </Label>

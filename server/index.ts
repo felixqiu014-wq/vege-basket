@@ -10820,6 +10820,33 @@ app.get('/api/package-market/rules', asyncHandler(async (request, response) => {
   })
 }))
 
+app.get('/api/package-market/packages/base', asyncHandler(async (request, response) => {
+  const userId = await ensureUserId(request, response)
+  if (!userId) return
+  const packageId = String(request.query.deployType) === 'oss' ? 'base-oss' : 'base-pro'
+  response.json(await getPackageMarketDetail({
+    packageId,
+    arch: String(request.query.arch ?? 'amd64'),
+    channel: 'release',
+    expireMinutes: ensurePackageMarketExpireMinutes(request.query.expireMinutes),
+    includeAll: ensurePackageMarketIncludeAll(request.query.includeAll),
+    releaseVersion: String(request.query.releaseVersion ?? request.query.version ?? ''),
+  }))
+}))
+
+app.get('/api/package-market/packages/base/release-versions', asyncHandler(async (request, response) => {
+  const userId = await ensureUserId(request, response)
+  if (!userId) return
+  const packageId = String(request.query.deployType) === 'oss' ? 'base-oss' : 'base-pro'
+  response.json({
+    versions: await listPackageMarketReleaseVersions({
+      packageId,
+      arch: String(request.query.arch ?? 'amd64'),
+      includeAll: ensurePackageMarketIncludeAll(request.query.includeAll),
+    }),
+  })
+}))
+
 app.get('/api/package-market/packages/:packageId', asyncHandler(async (request, response) => {
   const userId = await ensureUserId(request, response)
   if (!userId) return

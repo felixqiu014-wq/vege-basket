@@ -135,6 +135,16 @@ spec:
       type: string
       default: ''
       required: false
+    PACKAGE_MARKET_BASE_OBJECT_TEMPLATE:
+      description: Optional legacy base-package object template; apps rules take precedence.
+      type: string
+      default: ''
+      required: false
+    PACKAGE_MARKET_BASE_LIST_PREFIX_TEMPLATE:
+      description: Optional legacy base-package listing prefix; apps rules take precedence.
+      type: string
+      default: ''
+      required: false
     PACKAGE_MARKET_DOWNLOAD_EXPIRE_SECONDS:
       description: Optional signed URL expiry time in seconds for package downloads.
       type: string
@@ -427,6 +437,10 @@ spec:
               value: /app/server/trial-combo-package-rules.yaml
             - name: PACKAGE_MARKET_MIDDLEWARE_ROOT
               value: ${{ inputs.PACKAGE_MARKET_MIDDLEWARE_ROOT }}
+            - name: PACKAGE_MARKET_BASE_OBJECT_TEMPLATE
+              value: ${{ inputs.PACKAGE_MARKET_BASE_OBJECT_TEMPLATE }}
+            - name: PACKAGE_MARKET_BASE_LIST_PREFIX_TEMPLATE
+              value: ${{ inputs.PACKAGE_MARKET_BASE_LIST_PREFIX_TEMPLATE }}
             - name: PACKAGE_MARKET_DOWNLOAD_EXPIRE_SECONDS
               value: ${{ inputs.PACKAGE_MARKET_DOWNLOAD_EXPIRE_SECONDS }}
           readinessProbe:

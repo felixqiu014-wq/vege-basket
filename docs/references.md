@@ -105,12 +105,15 @@ OSS and package market:
 | `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_BUCKET` | OSS credentials and bucket. |
 | `PACKAGE_MARKET_RULES_FILE` | Defaults to `server/trial-combo-package-rules.yaml`. |
 | `PACKAGE_MARKET_MIDDLEWARE_ROOT` | Allowed middleware prefix. |
+| `PACKAGE_MARKET_BASE_OBJECT_TEMPLATE` | Compatibility template for legacy base-package objects. Apps rules take precedence. |
+| `PACKAGE_MARKET_BASE_LIST_PREFIX_TEMPLATE` | Compatibility listing prefix for legacy base-package objects. |
 | `PACKAGE_MARKET_DOWNLOAD_EXPIRE_SECONDS` | Default signed URL lifetime; fallback is 30 minutes. |
 | `TODO_IMAGE_UPLOAD_MAX_BYTES` | Default `10485760` bytes. Applies to todo images and test-workbench evidence attachments. |
 | `TODO_IMAGE_OBJECT_PREFIX` | Default `todo-images`. Used for todo images and test-workbench evidence attachments. |
 | `TODO_IMAGE_URL_SECRET` | HMAC secret for todo image and test-workbench evidence URLs; falls back to OAuth state secret or encryption key ring. |
 
 Compatibility aliases remain accepted for `OSS_UI_MIDDLEWARE_ROOT`,
+`OSS_UI_BASE_OBJECT_TEMPLATE`, `OSS_UI_BASE_LIST_PREFIX_TEMPLATE`,
 `OSS_UI_DOWNLOAD_EXPIRE_SECONDS`, and `TRIAL_COMBO_PACKAGE_RULES_FILE`. New deployments
 should use the `PACKAGE_MARKET_*` names.
 
