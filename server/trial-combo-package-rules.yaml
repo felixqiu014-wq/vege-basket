@@ -3,42 +3,38 @@ rules:
     name: sealos-pro
     category: apps
     release_roots:
-      - offline/pro/
-      - offline/sealos-apps/sealos-pro/release/
+      - offline/pro/release/
     file_name_formats:
       - sealos-pro-%s-%s.tar
       - sealos-pro-%s-%s.tar.gz
-      - sealos-pro-cluster-%s-%s.tar
-      - sealos-pro-cluster-%s-%s.tar.gz
     ci_file_name_formats:
       - sealos-pro-main-%s-%s.tar
       - sealos-pro-main-%s-%s.tar.gz
       - sealos-pro-latest-%s-%s.tar
       - sealos-pro-latest-%s-%s.tar.gz
-      - sealos-pro-cluster-main-%s-%s.tar
-      - sealos-pro-cluster-main-%s-%s.tar.gz
-      - sealos-pro-cluster-latest-%s-%s.tar
-      - sealos-pro-cluster-latest-%s-%s.tar.gz
   sealos-oss:
     name: sealos-oss
     category: apps
     release_roots:
-      - offline/oss/
-      - offline/sealos-apps/sealos-oss/release/
+      - offline/oss/release/
     file_name_formats:
       - sealos-oss-%s-%s.tar
       - sealos-oss-%s-%s.tar.gz
-      - sealos-oss-cluster-%s-%s.tar
-      - sealos-oss-cluster-%s-%s.tar.gz
     ci_file_name_formats:
       - sealos-oss-main-%s-%s.tar
       - sealos-oss-main-%s-%s.tar.gz
       - sealos-oss-latest-%s-%s.tar
       - sealos-oss-latest-%s-%s.tar.gz
-      - sealos-oss-cluster-main-%s-%s.tar
-      - sealos-oss-cluster-main-%s-%s.tar.gz
-      - sealos-oss-cluster-latest-%s-%s.tar
-      - sealos-oss-cluster-latest-%s-%s.tar.gz
+  state-metrics:
+    name: state-metrics
+    release_roots:
+      - offline/sealos-apps/state-metrics/release/
+    file_name_formats:
+      - state-metrics-cluster-%s-%s.tar
+      - state-metrics-cluster-%s-%s.tar.gz
+    ci_file_name_formats:
+      - state-metrics-cluster-latest-%s-%s.tar
+      - state-metrics-cluster-latest-%s-%s.tar.gz
   kite:
     name: sealos-kite
     release_roots:
@@ -52,10 +48,12 @@ rules:
   admin:
     name: admin
     release_roots:
-      - offline/sealos-apps/admin/releases/
+      - offline/sealos-apps/admin/release/
     file_name_formats:
       - admin-cluster-%s-%s.tar
       - admin-cluster-%s-%s.tar.gz
+      - sealos-admin-cluster-%s-%s.tar
+      - sealos-admin-cluster-%s-%s.tar.gz
       - admin-v2-cluster-%s-%s.tar
       - admin-v2-cluster-%s-%s.tar.gz
     ci_file_name_formats:
@@ -65,37 +63,14 @@ rules:
       - sealos-admin-cluster-latest-%s-%s.tar.gz
       - admin-v2-cluster-latest-%s-%s.tar
       - admin-v2-cluster-latest-%s-%s.tar.gz
-  devbox-cache:
-    name: devbox-cache
-    flat_file_roots:
-      - offline/sealos-pro/devbox-cache/
-    file_name_formats:
-      - devbox-cache-%s-cuda-cache-%s.tar
-      - devbox-cache-%s-cache-%s.tar.gz
-    ci_file_name_formats:
-      - devbox-cache-latest-%s-cache-%s.tar
-      - devbox-cache-latest-%s-cache-%s.tar.gz
-      - devbox-cache-latest-%s-cuda-cache-%s.tar
-      - devbox-cache-latest-%s-cuda-cache-%s.tar.gz
-      - devbox-cache-main-%s-cache-%s.tar
-      - devbox-cache-main-%s-cache-%s.tar.gz
-      - devbox-cache-main-%s-cuda-cache-%s.tar
-      - devbox-cache-main-%s-cuda-cache-%s.tar.gz
-    flat_file_name_prefix: devbox-cache-
-    flat_file_name_suffix: -cache-%s.tar
-    flat_file_name_suffixes:
-      - -cuda-cache-%s.tar
   sealaf:
     name: sealaf
     release_roots:
       - offline/sealos-apps/sealaf/release/
-      - offline/sealos-apps/sealaf/releases/
       - offline/sealaf/release/
-      - offline/sealaf/releases/
     flat_file_roots:
       - offline/sealos-apps/sealaf/
       - offline/sealos-apps/sealaf/release/
-      - offline/sealos-apps/sealaf/releases/
       - offline/sealaf/
     file_name_formats:
       - sealaf-cluster-%s-%s.tar
@@ -147,36 +122,6 @@ rules:
       - objectstorage-cluster-main-%s-%s.tar.gz
       - objectstorage-cluster-latest-%s-%s.tar
       - objectstorage-cluster-latest-%s-%s.tar.gz
-  offline-center:
-    name: offline-center
-    release_roots:
-      - offline/sealos-apps/offline-center/release/
-    file_name_formats:
-      - offline-center-cluster-%s-%s.tar
-      - offline-center-cluster-%s-%s.tar.gz
-      - offline-center-%s-%s.tar
-      - offline-center-%s-%s.tar.gz
-    ci_file_name_formats:
-      - offline-center-cluster-main-%s-%s.tar
-      - offline-center-cluster-main-%s-%s.tar.gz
-      - offline-center-cluster-latest-%s-%s.tar
-      - offline-center-cluster-latest-%s-%s.tar.gz
-  offline-center-desktop-cache:
-    name: offline-center-desktop-cache
-    parent: offline-center
-    release_roots:
-      - offline/sealos-apps/offline-center/release/
-    file_name_formats:
-      - offline-center-desktop-cache-cluster-%s.tar
-      - offline-center-desktop-cache-cluster-%s.tar.gz
-  offline-center-vscode-cache:
-    name: offline-center-vscode-cache
-    parent: offline-center
-    release_roots:
-      - offline/sealos-apps/offline-center/release/
-    file_name_formats:
-      - offline-center-vscode-cache-cluster-%s.tar
-      - offline-center-vscode-cache-cluster-%s.tar.gz
   cronjob:
     name: cronjob
     release_roots:
@@ -206,25 +151,13 @@ rules:
     release_roots:
       - offline/sealos-apps/devbox/release/
     file_name_formats:
-      - devbox-v1-cluster-%s-%s.tar
-      - devbox-v1-cluster-%s-%s.tar.gz
-      - devbox-v1-cri-shim-patch-%s-%s.tar
-      - devbox-v1-cri-shim-patch-%s-%s.tar.gz
       - devbox-v2-cluster-%s-%s.tar
-      - devbox-v2-cluster-%s-%s.tar.gz
+      - devbox-v2-containerd-patch-%s-%s.tar
     ci_file_name_formats:
-      - devbox-v1-cluster-main-%s-%s.tar
-      - devbox-v1-cluster-main-%s-%s.tar.gz
-      - devbox-v1-cri-shim-patch-main-%s-%s.tar
-      - devbox-v1-cri-shim-patch-main-%s-%s.tar.gz
       - devbox-v2-cluster-main-%s-%s.tar
-      - devbox-v2-cluster-main-%s-%s.tar.gz
-      - devbox-v1-cluster-latest-%s-%s.tar
-      - devbox-v1-cluster-latest-%s-%s.tar.gz
-      - devbox-v1-cri-shim-patch-latest-%s-%s.tar
-      - devbox-v1-cri-shim-patch-latest-%s-%s.tar.gz
+      - devbox-v2-containerd-patch-main-%s-%s.tar
       - devbox-v2-cluster-latest-%s-%s.tar
-      - devbox-v2-cluster-latest-%s-%s.tar.gz
+      - devbox-v2-containerd-patch-latest-%s-%s.tar
   storage-manager:
     name: storage-manager
     release_roots:
@@ -237,3 +170,22 @@ rules:
       - storage-manager-cluster-main-%s-%s.tar.gz
       - storage-manager-cluster-latest-%s-%s.tar
       - storage-manager-cluster-latest-%s-%s.tar.gz
+  offline-center:
+    name: offline-center
+    release_roots:
+      - offline/sealos-apps/offline-center/release/
+    file_name_formats:
+      - offline-center-cluster-%s-%s.tar
+    ci_file_name_formats:
+      - offline-center-cluster-main-%s-%s.tar
+      - offline-center-cluster-latest-%s-%s.tar
+  devbox-runtime:
+    name: devbox-runtime
+    category: dependency
+    parent: devbox
+    dependency_roots:
+      - offline/sealos-apps/devbox/devbox/runtime/packages/
+    dependency_file_patterns:
+      - devbox-runtime-%s-%s.tar.gz
+      - devbox-runtime-images.%s.txt
+      - devbox.xlsx

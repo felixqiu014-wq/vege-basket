@@ -143,7 +143,7 @@ test('allows offline-center release package objects from bundled rules', () => {
     isAllowedPackageMarketObjectKey(
       'offline/sealos-apps/offline-center/release/v5.1.2-alpha4/offline-center-v5.1.2-alpha4-amd64.tar.gz',
     ),
-    true,
+    false,
   )
 })
 
@@ -175,8 +175,8 @@ test('returns bundled package market rules without OSS credentials', async () =>
     for (const key of keys) delete process.env[key]
     const rules = await listPackageMarketRules()
     assert.ok(rules.some((rule) => rule.id === 'offline-center'))
-    assert.ok(rules.some((rule) => rule.id === 'offline-center-desktop-cache'))
-    assert.ok(rules.some((rule) => rule.id === 'offline-center-vscode-cache'))
+    assert.ok(rules.some((rule) => rule.id === 'state-metrics'))
+    assert.equal(rules.some((rule) => rule.id === 'devbox-cache'), false)
     assert.equal(rules.find((rule) => rule.id === 'sealos-pro')?.category, 'apps')
     assert.equal(rules.find((rule) => rule.id === 'sealos-pro')?.fileNameFormats.includes('sealos-pro-%s-%s.tar'), true)
     assert.equal(rules.find((rule) => rule.id === 'sealos-oss')?.category, 'apps')
@@ -194,19 +194,19 @@ test('returns bundled package market rules without OSS credentials', async () =>
 test('allows sealos base packages through the APPS release rules', () => {
   assert.equal(
     isAllowedPackageMarketObjectKey(
-      'offline/pro/v5.1.2/sealos-pro-v5.1.2-amd64.tar.gz',
+      'offline/pro/release/v5.1.2/sealos-pro-v5.1.2-amd64.tar.gz',
     ),
     true,
   )
   assert.equal(
     isAllowedPackageMarketObjectKey(
-      'offline/oss/v5.1.2/sealos-oss-v5.1.2-arm64.tar.gz',
+      'offline/oss/release/v5.1.2/sealos-oss-v5.1.2-arm64.tar.gz',
     ),
     true,
   )
   assert.equal(
     isAllowedPackageMarketObjectKey(
-      'offline/pro/v5.1.2/unconfigured-package-v5.1.2-amd64.tar.gz',
+      'offline/pro/release/v5.1.2/unconfigured-package-v5.1.2-amd64.tar.gz',
     ),
     false,
   )
@@ -215,13 +215,13 @@ test('allows sealos base packages through the APPS release rules', () => {
 test('allows sealos base packages through standard APPS CI rules', () => {
   assert.equal(
     isAllowedPackageMarketObjectKey(
-      'offline/sealos-apps/sealos-pro/ci/main/882f04e/sealos-pro-main-882f04e-amd64.tar.gz',
+      'offline/pro/ci/main/882f04e/sealos-pro-main-882f04e-amd64.tar.gz',
     ),
     true,
   )
   assert.equal(
     isAllowedPackageMarketObjectKey(
-      'offline/sealos-apps/sealos-oss/ci/main/882f04e/sealos-oss-main-882f04e-amd64.tar.gz',
+      'offline/oss/ci/main/882f04e/sealos-oss-main-882f04e-amd64.tar.gz',
     ),
     true,
   )
