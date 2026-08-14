@@ -170,6 +170,9 @@ test('returns bundled package market rules without OSS credentials', async () =>
     assert.ok(rules.some((rule) => rule.id === 'offline-center'))
     assert.ok(rules.some((rule) => rule.id === 'offline-center-desktop-cache'))
     assert.ok(rules.some((rule) => rule.id === 'offline-center-vscode-cache'))
+    assert.equal(rules.find((rule) => rule.id === 'sealos-pro')?.category, 'apps')
+    assert.equal(rules.find((rule) => rule.id === 'sealos-pro')?.fileNameFormats.includes('sealos-pro-%s-%s.tar'), true)
+    assert.equal(rules.find((rule) => rule.id === 'sealos-oss')?.category, 'apps')
   } finally {
     for (const key of keys) {
       if (previous[key] == null) {
@@ -179,6 +182,42 @@ test('returns bundled package market rules without OSS credentials', async () =>
       }
     }
   }
+})
+
+test('allows sealos base packages through the APPS release rules', () => {
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/pro/v5.1.2/sealos-pro-v5.1.2-amd64.tar.gz',
+    ),
+    true,
+  )
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/oss/v5.1.2/sealos-oss-v5.1.2-arm64.tar.gz',
+    ),
+    true,
+  )
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/pro/v5.1.2/unconfigured-package-v5.1.2-amd64.tar.gz',
+    ),
+    false,
+  )
+})
+
+test('allows sealos base packages through standard APPS CI rules', () => {
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/sealos-apps/sealos-pro/ci/main/882f04e/sealos-pro-main-882f04e-amd64.tar.gz',
+    ),
+    true,
+  )
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/sealos-apps/sealos-oss/ci/main/882f04e/sealos-oss-main-882f04e-amd64.tar.gz',
+    ),
+    true,
+  )
 })
 
 test('rejects cache-cluster attachments with mismatched app names or versions', () => {

@@ -1,4 +1,44 @@
 rules:
+  sealos-pro:
+    name: sealos-pro
+    category: apps
+    release_roots:
+      - offline/pro/
+      - offline/sealos-apps/sealos-pro/release/
+    file_name_formats:
+      - sealos-pro-%s-%s.tar
+      - sealos-pro-%s-%s.tar.gz
+      - sealos-pro-cluster-%s-%s.tar
+      - sealos-pro-cluster-%s-%s.tar.gz
+    ci_file_name_formats:
+      - sealos-pro-main-%s-%s.tar
+      - sealos-pro-main-%s-%s.tar.gz
+      - sealos-pro-latest-%s-%s.tar
+      - sealos-pro-latest-%s-%s.tar.gz
+      - sealos-pro-cluster-main-%s-%s.tar
+      - sealos-pro-cluster-main-%s-%s.tar.gz
+      - sealos-pro-cluster-latest-%s-%s.tar
+      - sealos-pro-cluster-latest-%s-%s.tar.gz
+  sealos-oss:
+    name: sealos-oss
+    category: apps
+    release_roots:
+      - offline/oss/
+      - offline/sealos-apps/sealos-oss/release/
+    file_name_formats:
+      - sealos-oss-%s-%s.tar
+      - sealos-oss-%s-%s.tar.gz
+      - sealos-oss-cluster-%s-%s.tar
+      - sealos-oss-cluster-%s-%s.tar.gz
+    ci_file_name_formats:
+      - sealos-oss-main-%s-%s.tar
+      - sealos-oss-main-%s-%s.tar.gz
+      - sealos-oss-latest-%s-%s.tar
+      - sealos-oss-latest-%s-%s.tar.gz
+      - sealos-oss-cluster-main-%s-%s.tar
+      - sealos-oss-cluster-main-%s-%s.tar.gz
+      - sealos-oss-cluster-latest-%s-%s.tar
+      - sealos-oss-cluster-latest-%s-%s.tar.gz
   kite:
     name: sealos-kite
     release_roots:

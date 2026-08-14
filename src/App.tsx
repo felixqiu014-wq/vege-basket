@@ -133,8 +133,6 @@ import {
   createTodoNote,
   declineProjectInvitation,
   exportProjectPackageTimeline,
-  fetchPackageMarketBaseDetail,
-  fetchPackageMarketBaseReleaseVersions,
   fetchPackageMarketCiBranches,
   fetchPackageMarketCiVersions,
   fetchPackageMarketDetail,
@@ -3657,23 +3655,11 @@ function App() {
     channel: PackageMarketChannel
     ciBranch?: string
     ciVersion?: string
-    deployType?: 'pro' | 'oss'
     expireMinutes?: number
     includeAll?: boolean
     packageId: string
     releaseVersion?: string
   }): Promise<PackageMarketDetail> {
-    if (payload.packageId === 'base-pro' || payload.packageId === 'base-oss') {
-      return fetchPackageMarketBaseDetail({
-        arch: payload.arch,
-        channel: payload.channel,
-        deployType: payload.packageId === 'base-oss' ? 'oss' : 'pro',
-        expireMinutes: payload.expireMinutes,
-        includeAll: payload.includeAll,
-        releaseVersion: payload.releaseVersion,
-      })
-    }
-
     return fetchPackageMarketDetail(payload)
   }
 
@@ -3685,7 +3671,6 @@ function App() {
     arch: string
     ciBranch?: string
     kind: 'ci' | 'release'
-    deployType?: 'pro' | 'oss'
     includeAll?: boolean
     packageId: string
   }): Promise<PackageMarketVersion[]> {
@@ -3695,14 +3680,6 @@ function App() {
         ciBranch: payload.ciBranch,
         includeAll: payload.includeAll,
         packageId: payload.packageId,
-      })).versions
-    }
-
-    if (payload.packageId === 'base-pro' || payload.packageId === 'base-oss') {
-      return (await fetchPackageMarketBaseReleaseVersions({
-        arch: payload.arch,
-        deployType: payload.packageId === 'base-oss' ? 'oss' : 'pro',
-        includeAll: payload.includeAll,
       })).versions
     }
 
@@ -5884,7 +5861,6 @@ function ProjectDetail({
     channel: PackageMarketChannel
     ciBranch?: string
     ciVersion?: string
-    deployType?: 'pro' | 'oss'
     includeAll?: boolean
     packageId: string
     releaseVersion?: string
@@ -5899,7 +5875,6 @@ function ProjectDetail({
     arch: string
     ciBranch?: string
     kind: 'ci' | 'release'
-    deployType?: 'pro' | 'oss'
     includeAll?: boolean
     packageId: string
   }) => Promise<PackageMarketVersion[]>

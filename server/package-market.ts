@@ -75,13 +75,6 @@ const middlewareRoots = normalizeList([
   process.env.OSS_UI_MIDDLEWARE_ROOT,
   defaultMiddlewareRoot,
 ]).map(normalizePrefix)
-const baseObjectTemplate = normalizeString(
-  process.env.PACKAGE_MARKET_BASE_OBJECT_TEMPLATE ?? process.env.OSS_UI_BASE_OBJECT_TEMPLATE,
-)
-const baseListPrefixTemplate = normalizeString(
-  process.env.PACKAGE_MARKET_BASE_LIST_PREFIX_TEMPLATE ??
-    process.env.OSS_UI_BASE_LIST_PREFIX_TEMPLATE,
-)
 const serverDir = path.dirname(fileURLToPath(import.meta.url))
 const bundledRulesFile = path.join(serverDir, 'trial-combo-package-rules.yaml')
 const rulesFile = normalizeString(
@@ -155,31 +148,8 @@ function normalizeList(values: unknown[]) {
   return list
 }
 
-function renderTemplate(template: string, values: Record<string, string>) {
-  return normalizeString(template).replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? '')
-}
-
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function templateMatcher(
-  template: string,
-  prefixOnly = false,
-  fixedValues: Record<string, string> = {},
-) {
-  const normalized = normalizeString(template)
-  if (!normalized) return null
-  let pattern = ''
-  let cursor = 0
-  for (const match of normalized.matchAll(/\{(\w+)\}/g)) {
-    const offset = match.index ?? 0
-    pattern += escapeRegExp(normalized.slice(cursor, offset))
-    pattern += match[1] in fixedValues ? escapeRegExp(fixedValues[match[1]]) : '[^/]+'
-    cursor = offset + match[0].length
-  }
-  pattern += escapeRegExp(normalized.slice(cursor))
-  return new RegExp(`^${pattern}${prefixOnly ? '' : '$'}`)
 }
 
 function splitVersionPart(part: string) {
@@ -482,21 +452,6 @@ export function isAllowedPackageMarketObjectKey(value: unknown) {
   }
   if (cacheClusterPackageAllowsObjectKey(objectKey)) return true
   if (middlewareRootAllowsObjectKey(objectKey)) return true
-
-  for (const deployType of ['pro', 'oss']) {
-    if (templateMatcher(baseObjectTemplate, false, { deployType })?.test(objectKey)) return true
-    const prefixMatch = templateMatcher(baseListPrefixTemplate, true, { deployType })?.exec(objectKey)
-    if (!prefixMatch) continue
-    const [version, fileName, ...extra] = objectKey.slice(prefixMatch[0].length).split('/')
-    if (
-      version &&
-      fileName &&
-      extra.length === 0 &&
-      /^sealos-(?:pro|commercial|oss)-[^/]+-[^/]+\.tar(?:\.gz)?$/.test(fileName)
-    ) {
-      return true
-    }
-  }
   return false
 }
 
@@ -1070,99 +1025,6 @@ async function buildProMiddlewareCiPackage(
   }
 }
 
-async function listBaseVersions(client: OSS, deployType: string, arch: string) {
-  const normalizedDeployType = normalizeString(deployType || 'pro').toLowerCase()
-  if (!baseListPrefixTemplate) return []
-  const packageNames =
-    normalizedDeployType === 'pro' ? ['sealos-pro', 'sealos-commercial'] : [`sealos-${normalizedDeployType}`]
-  const listPrefix = normalizePrefix(renderTemplate(baseListPrefixTemplate, { deployType: normalizedDeployType, arch }))
-  const objects = await listAllObjects(client, listPrefix)
-  const versions = new Map<string, { object: OssObject; version: string }>()
-
-  for (const object of objects) {
-    const rest = object.name.slice(listPrefix.length)
-    const parts = rest.split('/')
-    if (parts.length < 2) continue
-    const version = normalizeVersion(parts[0])
-    const fileName = parts[1]
-    const expectedNames = packageNames.flatMap((packageName) =>
-      candidateFileNames([`${packageName}-%s-%s.tar`], version, arch),
-    )
-    if (!expectedNames.includes(fileName)) continue
-    const current = versions.get(version)
-    if (!current || objectTime(object) > objectTime(current.object)) {
-      versions.set(version, { version, object })
-    }
-  }
-
-  return [...versions.values()]
-    .sort((a, b) => compareVersions(b.version, a.version))
-    .map((item) => ({
-      version: item.version,
-      label: versionLabel({ version: item.version, lastModified: item.object.lastModified }),
-      lastModified: item.object.lastModified,
-    }))
-}
-
-async function buildBasePackage(
-  client: OSS,
-  deployType: string,
-  releaseVersion: string,
-  arch: string,
-  expireSeconds = downloadExpireSeconds,
-): Promise<PackageMarketDetail> {
-  if (!baseObjectTemplate) throw new Error('PACKAGE_MARKET_BASE_OBJECT_TEMPLATE must be set')
-  const versions = await listBaseVersions(client, deployType, arch)
-  const version = normalizeVersion(releaseVersion) || versions[0]?.version || ''
-  const normalizedDeployType = normalizeString(deployType || 'pro').toLowerCase()
-  if (!version || !arch || !normalizedDeployType) {
-    throw new Error('deployType, releaseVersion and arch are required')
-  }
-
-  const packageNames =
-    normalizedDeployType === 'pro' ? ['sealos-pro', 'sealos-commercial'] : [`sealos-${normalizedDeployType}`]
-  const links: PackageMarketLink[] = []
-
-  for (const packageName of packageNames) {
-    for (const fileName of candidateFileNames([`${packageName}-%s-%s.tar`], version, arch)) {
-      const key = renderTemplate(baseObjectTemplate, {
-        deployType: normalizedDeployType,
-        version,
-        fileName,
-        arch,
-        packageName,
-      })
-      try {
-        const head = await client.head(key)
-        const headers = head.res.headers as Record<string, string | number | undefined>
-        links.push(
-          objectToLink(client, packageName, version, {
-            name: key,
-            size: Number(headers['content-length']),
-            lastModified: String(headers['last-modified'] ?? ''),
-          }, expireSeconds),
-        )
-        break
-      } catch (error) {
-        const ossError = error as { code?: string; status?: number }
-        if (ossError.code !== 'NoSuchKey' && ossError.status !== 404) throw error
-      }
-    }
-  }
-
-  return {
-    title: '基础包',
-    type: 'main package',
-    meta: [
-      { label: '部署类型', value: normalizedDeployType.toUpperCase() },
-      { label: '基础包版本', value: version },
-      { label: '下载有效期', value: `${Math.round(expireSeconds / 60)} 分钟` },
-    ],
-    releaseVersions: versions,
-    links,
-  }
-}
-
 async function listReleaseVersions(
   client: OSS,
   rule: PackageMarketRule,
@@ -1402,7 +1264,6 @@ export async function getPackageMarketDetail(params: {
   channel: 'release' | 'ci'
   ciBranch?: string
   ciVersion?: string
-  deployType?: string
   expireMinutes?: number
   includeAll?: boolean
   packageId: string
@@ -1412,16 +1273,6 @@ export async function getPackageMarketDetail(params: {
   const arch = normalizeString(params.arch || 'amd64').toLowerCase()
   const expireSeconds = normalizeDownloadExpireSeconds(params.expireMinutes)
   const includeAll = params.includeAll === true
-  if (params.packageId === 'base-pro' || params.packageId === 'base-oss') {
-    const deployType = params.packageId === 'base-oss' ? 'oss' : 'pro'
-    return buildBasePackage(
-      client,
-      deployType,
-      params.releaseVersion || '',
-      arch,
-      expireSeconds,
-    )
-  }
 
   const middlewareName = proMiddlewareNameFromId(params.packageId)
   if (middlewareName) {
@@ -1450,20 +1301,11 @@ export async function getPackageMarketDetail(params: {
 
 export async function listPackageMarketReleaseVersions(params: {
   arch: string
-  deployType?: string
   includeAll?: boolean
   packageId: string
 }) {
   const client = ossClient()
   const arch = normalizeString(params.arch || 'amd64').toLowerCase()
-  if (params.packageId === 'base-pro' || params.packageId === 'base-oss') {
-    const deployType = params.packageId === 'base-oss' ? 'oss' : 'pro'
-    return listBaseVersions(
-      client,
-      deployType,
-      arch,
-    )
-  }
 
   const middlewareName = proMiddlewareNameFromId(params.packageId)
   if (middlewareName) {
