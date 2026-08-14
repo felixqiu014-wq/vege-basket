@@ -20,6 +20,8 @@ import {
   Check,
   Copy,
   DotsThree,
+  Eye,
+  EyeSlash,
   FunnelSimple,
   LinkSimple,
   Package,
@@ -125,6 +127,7 @@ type PackageWorkbenchProps = {
     ciVersion?: string
     deployType?: 'pro' | 'oss'
     expireMinutes?: number
+    includeAll?: boolean
     packageId: string
     releaseVersion?: string
   }) => Promise<PackageMarketDetail>
@@ -139,6 +142,7 @@ type PackageWorkbenchProps = {
     ciBranch?: string
     kind: 'ci' | 'release'
     deployType?: 'pro' | 'oss'
+    includeAll?: boolean
     packageId: string
   }) => Promise<PackageMarketVersion[]>
   onSaveEvent: (
@@ -645,6 +649,7 @@ export function PackageMarketBrowser({
   const [marketReleaseVersion, setMarketReleaseVersion] = useState('')
   const [marketCiBranch, setMarketCiBranch] = useState('')
   const [marketCiVersion, setMarketCiVersion] = useState('')
+  const [marketIncludeAll, setMarketIncludeAll] = useState(false)
   const [marketCiBranches, setMarketCiBranches] = useState<PackageMarketCiBranch[]>([])
   const [marketReleaseVersions, setMarketReleaseVersions] = useState<PackageMarketVersion[]>([])
   const [marketCiVersions, setMarketCiVersions] = useState<PackageMarketVersion[]>([])
@@ -666,6 +671,7 @@ export function PackageMarketBrowser({
       channel: PackageMarketChannel
       ciVersion: string
       expireMinutes: number
+      includeAll: boolean
       marketRules: PackageMarketRule[]
       packageId: string
       releaseVersion: string
@@ -712,11 +718,12 @@ export function PackageMarketBrowser({
   async function refreshMarketDependencyDetails(params: {
     arch: 'amd64' | 'arm64'
     expireMinutes: number
+    includeAll: boolean
     requestId: number
     rules: PackageMarketRule[]
     selectedVersions?: Record<string, string>
   }) {
-    const { arch, expireMinutes, requestId, rules, selectedVersions = {} } = params
+    const { arch, expireMinutes, includeAll, requestId, rules, selectedVersions = {} } = params
     if (rules.length === 0) {
       setMarketDependencyDetails([])
       return
@@ -738,6 +745,7 @@ export function PackageMarketBrowser({
         const versions = await onLoadPackageMarketVersions({
           arch,
           kind: dependencyChannel,
+          includeAll,
           packageId: rule.id,
         })
         const selectedVersion =
@@ -749,6 +757,7 @@ export function PackageMarketBrowser({
           channel: dependencyChannel,
           arch,
           expireMinutes,
+          includeAll,
           ciVersion: dependencyChannel === 'ci' ? selectedVersion : '',
           releaseVersion: dependencyChannel === 'release' ? selectedVersion : '',
         })
@@ -791,6 +800,7 @@ export function PackageMarketBrowser({
     ciBranch: string
     ciVersion: string
     expireMinutes: number
+    includeAll: boolean
     marketRules: PackageMarketRule[]
     packageId: string
     releaseVersion: string
@@ -803,6 +813,7 @@ export function PackageMarketBrowser({
     const requestedCiBranch = nextOverrides?.ciBranch ?? marketCiBranch
     const ciVersion = nextOverrides?.ciVersion ?? marketCiVersion
     const expireMinutes = nextOverrides?.expireMinutes ?? marketExpireMinutes
+    const includeAll = nextOverrides?.includeAll ?? marketIncludeAll
     const rules = nextOverrides?.marketRules ?? marketRules
     const requestId = ++marketDetailRequestIdRef.current
     setMarketLoading(true)
@@ -832,11 +843,13 @@ export function PackageMarketBrowser({
               arch,
               ciBranch,
               kind: 'ci',
+              includeAll,
               packageId,
             })
           : onLoadPackageMarketVersions({
               arch,
               kind: 'release',
+              includeAll,
               packageId,
               deployType: packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
             }),
@@ -848,6 +861,7 @@ export function PackageMarketBrowser({
           deployType:
             packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
           expireMinutes,
+          includeAll,
           releaseVersion,
           ciVersion,
         }),
@@ -869,6 +883,7 @@ export function PackageMarketBrowser({
       void refreshMarketDependencyDetails({
         arch,
         expireMinutes,
+        includeAll,
         requestId,
         rules: dependencyRules,
         selectedVersions: nextOverrides?.dependencyVersions,
@@ -894,6 +909,7 @@ export function PackageMarketBrowser({
     link: PackageMarketDetail['links'][number],
   ) {
     const fileName = link.objectKey.split('/').filter(Boolean).at(-1) || link.name
+    const canDownload = Boolean(link.downloadUrl)
     return (
       <article className="package-market-link-card" key={`${context?.packageId ?? detail.title}-${link.objectKey}-${link.version}`}>
         <div className="package-market-link-head">
@@ -902,7 +918,7 @@ export function PackageMarketBrowser({
             {link.size ? <small>{formatBytes(link.size)}</small> : null}
           </div>
           <div className="package-market-link-actions">
-            <Button
+            {canDownload ? <Button
               className="ghost-button"
               variant="outline"
               type="button"
@@ -914,8 +930,8 @@ export function PackageMarketBrowser({
               }
             >
               <Copy size={15} /> {copiedLabel(`browser-copy-download-url-${link.objectKey}`, '链接')}
-            </Button>
-            <Button
+            </Button> : null}
+            {canDownload ? <Button
               className="ghost-button"
               variant="outline"
               type="button"
@@ -927,7 +943,7 @@ export function PackageMarketBrowser({
               }
             >
               <TerminalWindow size={15} /> {copiedLabel(`browser-copy-download-command-${link.objectKey}`, '命令')}
-            </Button>
+            </Button> : null}
             <Button
               className="ghost-button"
               variant="outline"
@@ -942,9 +958,13 @@ export function PackageMarketBrowser({
         </div>
         <code>{link.objectKey}</code>
         <div className="package-market-link-footer">
-          <a href={link.downloadUrl} target="_blank" rel="noreferrer">
-            查看临时链接
-          </a>
+          {canDownload ? (
+            <a href={link.downloadUrl} target="_blank" rel="noreferrer">
+              查看临时链接
+            </a>
+          ) : (
+            <span className="package-market-link-readonly">当前规则不允许下载此对象</span>
+          )}
         </div>
       </article>
     )
@@ -990,6 +1010,21 @@ export function PackageMarketBrowser({
                 placeholder="sealos / db / app"
               />
             </Label>
+            <Button
+              className="package-market-show-all"
+              variant={marketIncludeAll ? 'default' : 'outline'}
+              type="button"
+              aria-pressed={marketIncludeAll}
+              title={marketIncludeAll ? '关闭全部包展示' : '展示全部包'}
+              onClick={() => {
+                const nextIncludeAll = !marketIncludeAll
+                setMarketIncludeAll(nextIncludeAll)
+                void refreshMarketDetail({ includeAll: nextIncludeAll })
+              }}
+            >
+              {marketIncludeAll ? <EyeSlash size={15} /> : <Eye size={15} />}
+              {marketIncludeAll ? '仅展示规则包' : '展示全部包'}
+            </Button>
             <PackageMarketRuleList>
               {(
                 [
@@ -1211,10 +1246,11 @@ export function PackageMarketBrowser({
                                     marketDependencyDetails.map((item) => [item.rule.id, item.selectedVersion]),
                                   )
                                   selectedVersions[dependency.rule.id] = value
-                                  void refreshMarketDependencyDetails({
-                                    arch: marketArch,
-                                    expireMinutes: marketExpireMinutes,
-                                    requestId: marketDetailRequestIdRef.current,
+                                    void refreshMarketDependencyDetails({
+                                      arch: marketArch,
+                                      expireMinutes: marketExpireMinutes,
+                                      includeAll: marketIncludeAll,
+                                      requestId: marketDetailRequestIdRef.current,
                                     rules: selectedMarketDependencyRules,
                                     selectedVersions,
                                   })
@@ -1487,6 +1523,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [marketReleaseVersion, setMarketReleaseVersion] = useState('')
   const [marketCiBranch, setMarketCiBranch] = useState('')
   const [marketCiVersion, setMarketCiVersion] = useState('')
+  const [marketIncludeAll, setMarketIncludeAll] = useState(false)
   const [marketCiBranches, setMarketCiBranches] = useState<PackageMarketCiBranch[]>([])
   const [marketReleaseVersions, setMarketReleaseVersions] = useState<PackageMarketVersion[]>([])
   const [marketCiVersions, setMarketCiVersions] = useState<PackageMarketVersion[]>([])
@@ -2006,11 +2043,12 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   async function refreshMarketDependencyDetails(params: {
     arch: 'amd64' | 'arm64'
     expireMinutes: number
+    includeAll: boolean
     requestId: number
     rules: PackageMarketRule[]
     selectedVersions?: Record<string, string>
   }) {
-    const { arch, expireMinutes, requestId, rules, selectedVersions = {} } = params
+    const { arch, expireMinutes, includeAll, requestId, rules, selectedVersions = {} } = params
     if (rules.length === 0) {
       setMarketDependencyDetails([])
       return
@@ -2032,6 +2070,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
         const versions = await onLoadPackageMarketVersions({
           arch,
           kind: dependencyChannel,
+          includeAll,
           packageId: rule.id,
         })
         const selectedVersion =
@@ -2043,6 +2082,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
           channel: dependencyChannel,
           arch,
           expireMinutes,
+          includeAll,
           ciVersion: dependencyChannel === 'ci' ? selectedVersion : '',
           releaseVersion: dependencyChannel === 'release' ? selectedVersion : '',
         })
@@ -2085,6 +2125,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     ciBranch: string
     ciVersion: string
     expireMinutes: number
+    includeAll: boolean
     marketRules: PackageMarketRule[]
     packageId: string
     releaseVersion: string
@@ -2097,6 +2138,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     const requestedCiBranch = nextOverrides?.ciBranch ?? marketCiBranch
     const ciVersion = nextOverrides?.ciVersion ?? marketCiVersion
     const expireMinutes = nextOverrides?.expireMinutes ?? marketExpireMinutes
+    const includeAll = nextOverrides?.includeAll ?? marketIncludeAll
     const rules = nextOverrides?.marketRules ?? marketRules
     const requestId = ++marketDetailRequestIdRef.current
     setMarketLoading(true)
@@ -2126,11 +2168,13 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
               arch,
               ciBranch,
               kind: 'ci',
+              includeAll,
               packageId,
             })
           : onLoadPackageMarketVersions({
               arch,
               kind: 'release',
+              includeAll,
               packageId,
               deployType: packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
             }),
@@ -2142,6 +2186,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
           deployType:
             packageId === 'base-oss' ? 'oss' : packageId === 'base-pro' ? 'pro' : undefined,
           expireMinutes,
+          includeAll,
           releaseVersion,
           ciVersion,
         }),
@@ -2163,6 +2208,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
       void refreshMarketDependencyDetails({
         arch,
         expireMinutes,
+        includeAll,
         requestId,
         rules: dependencyRules,
         selectedVersions: nextOverrides?.dependencyVersions,
@@ -2587,6 +2633,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     link: PackageMarketDetail['links'][number],
   ) {
     const fileName = link.objectKey.split('/').filter(Boolean).at(-1) || link.name
+    const canDownload = Boolean(link.downloadUrl)
     const alreadyAdded = selectedEventAddedObjectKeys.has(link.objectKey)
     return (
       <article className="package-market-link-card" key={`${context?.packageId ?? detail.title}-${link.objectKey}-${link.version}`}>
@@ -2596,7 +2643,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
             {link.size ? <small>{formatBytes(link.size)}</small> : null}
           </div>
           <div className="package-market-link-actions">
-            <Button
+            {canDownload ? <Button
               className="ghost-button"
               variant="outline"
               type="button"
@@ -2608,8 +2655,8 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
               }
             >
               <Copy size={15} /> {copiedLabel(`copy-download-url-${link.objectKey}`, '链接')}
-            </Button>
-            <Button
+            </Button> : null}
+            {canDownload ? <Button
               className="ghost-button"
               variant="outline"
               type="button"
@@ -2621,11 +2668,11 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
               }
             >
               <TerminalWindow size={15} /> {copiedLabel(`copy-download-command-${link.objectKey}`, '命令')}
-            </Button>
+            </Button> : null}
             <Button
               className="solid-button"
               type="button"
-              disabled={!context || alreadyAdded}
+              disabled={!context || !canDownload || alreadyAdded}
               onClick={() => addMarketLinkToCart(context, detail, link)}
             >
               <Package size={16} /> {alreadyAdded ? '已添加' : '添加'}
@@ -2634,9 +2681,13 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
         </div>
         <code>{link.objectKey}</code>
         <div className="package-market-link-footer">
-          <a href={link.downloadUrl} target="_blank" rel="noreferrer">
-            查看临时链接
-          </a>
+          {canDownload ? (
+            <a href={link.downloadUrl} target="_blank" rel="noreferrer">
+              查看临时链接
+            </a>
+          ) : (
+            <span className="package-market-link-readonly">当前规则不允许下载此对象</span>
+          )}
           <Button
             className="ghost-button"
             variant="outline"
@@ -3992,15 +4043,30 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
             </DialogDescription>
           </DialogHeader>
           <div className="package-market-grid">
-            <div className="package-market-sidebar">
-              <Label>
+          <div className="package-market-sidebar">
+            <Label>
                 搜索
                 <Input
                   value={marketSearch}
                   onChange={(event) => setMarketSearch(event.target.value)}
                   placeholder="sealos / db / app"
-                />
-              </Label>
+              />
+            </Label>
+            <Button
+              className="package-market-show-all"
+              variant={marketIncludeAll ? 'default' : 'outline'}
+              type="button"
+              aria-pressed={marketIncludeAll}
+              title={marketIncludeAll ? '关闭全部包展示' : '展示全部包'}
+              onClick={() => {
+                const nextIncludeAll = !marketIncludeAll
+                setMarketIncludeAll(nextIncludeAll)
+                void refreshMarketDetail({ includeAll: nextIncludeAll })
+              }}
+            >
+              {marketIncludeAll ? <EyeSlash size={15} /> : <Eye size={15} />}
+              {marketIncludeAll ? '仅展示规则包' : '展示全部包'}
+            </Button>
               <PackageMarketRuleList>
                 {(
                   [
@@ -4225,6 +4291,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                                     void refreshMarketDependencyDetails({
                                       arch: marketArch,
                                       expireMinutes: marketExpireMinutes,
+                                      includeAll: marketIncludeAll,
                                       requestId: marketDetailRequestIdRef.current,
                                       rules: selectedMarketDependencyRules,
                                       selectedVersions,

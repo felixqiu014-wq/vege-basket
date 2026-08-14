@@ -4,6 +4,8 @@ import {
   formatPackageMarketTimestamp,
   isAllowedPackageMarketObjectKey,
   listPackageMarketRules,
+  matchesPackageMarketCiFileName,
+  matchesPackageMarketReleaseFileName,
   normalizeOssEndpoint,
   normalizePackageMarketExpireMinutes,
 } from './package-market.ts'
@@ -20,6 +22,31 @@ test('formats package market timestamps in Shanghai time', () => {
   assert.equal(
     formatPackageMarketTimestamp('2026-08-02T22:36:00.000Z'),
     '2026-08-03 06:36',
+  )
+})
+
+test('uses configured release formats by default and exposes the fallback only on request', () => {
+  const rule = { fileNameFormats: ['devbox-v2-cluster-%s-%s.tar'] }
+  const legacyName = 'devbox-v1-cluster-v5.1.2-amd64.tar'
+  assert.equal(matchesPackageMarketReleaseFileName(rule, legacyName, 'v5.1.2', 'amd64'), false)
+  assert.equal(matchesPackageMarketReleaseFileName(rule, legacyName, 'v5.1.2', 'amd64', true), true)
+  assert.equal(
+    matchesPackageMarketReleaseFileName(rule, 'devbox-v2-cluster-v5.1.2-amd64.tar', 'v5.1.2', 'amd64'),
+    true,
+  )
+})
+
+test('uses configured CI formats by default and exposes the fallback only on request', () => {
+  const rule = {
+    ciFileNameFormats: ['devbox-v2-cluster-main-%s-%s.tar'],
+    fileNameFormats: ['devbox-v2-cluster-%s-%s.tar'],
+  }
+  const legacyName = 'devbox-v1-cluster-main-882202f-amd64.tar'
+  assert.equal(matchesPackageMarketCiFileName(rule, legacyName, '882202f', 'amd64'), false)
+  assert.equal(matchesPackageMarketCiFileName(rule, legacyName, '882202f', 'amd64', true), true)
+  assert.equal(
+    matchesPackageMarketCiFileName(rule, 'devbox-v2-cluster-main-882202f-amd64.tar', '882202f', 'amd64'),
+    true,
   )
 })
 

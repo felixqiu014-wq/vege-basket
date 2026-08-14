@@ -287,6 +287,45 @@ function objectMatchesArch(fileName: string, arch: string) {
   return !fileName.includes(`-${otherArch}.tar`)
 }
 
+export function matchesPackageMarketReleaseFileName(
+  rule: Pick<PackageMarketRule, 'fileNameFormats'>,
+  fileName: string,
+  version: string,
+  arch: string,
+  includeAll = false,
+) {
+  const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
+  if (expectedNames.includes(fileName)) return true
+  if (!includeAll) return false
+  return Boolean(
+    fileName &&
+    !fileName.includes('/') &&
+    isArchiveObjectKey(fileName) &&
+    fileName.includes(version) &&
+    objectMatchesArch(fileName, arch),
+  )
+}
+
+export function matchesPackageMarketCiFileName(
+  rule: Pick<PackageMarketRule, 'ciFileNameFormats' | 'fileNameFormats'>,
+  fileName: string,
+  hash: string,
+  arch: string,
+  includeAll = false,
+) {
+  const formats = rule.ciFileNameFormats.length > 0 ? rule.ciFileNameFormats : rule.fileNameFormats
+  const expectedNames = candidateFileNames(formats, hash, arch)
+  if (expectedNames.includes(fileName)) return true
+  if (!includeAll) return false
+  return Boolean(
+    fileName &&
+    !fileName.includes('/') &&
+    isArchiveObjectKey(fileName) &&
+    (fileName.includes(hash) || fileName.includes('latest') || fileName.includes('main')) &&
+    objectMatchesArch(fileName, arch),
+  )
+}
+
 function fileNameMatchesFormats(fileName: string, formats: string[], expectedFirstValue?: string) {
   return formats.some((format) => {
     const candidates = format.endsWith('.tar') ? [format, `${format}.gz`] : [format]
@@ -315,46 +354,32 @@ function releaseObjectMatches(
   object: OssObject,
   version: string,
   arch: string,
+  includeAll = false,
 ) {
-  const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
-  if (expectedNames.some((name) => object.name === `${root}${version}/${name}`)) {
-    return true
-  }
-
   const prefix = `${root}${version}/`
   if (!object.name.startsWith(prefix)) return false
   const fileName = object.name.slice(prefix.length)
-  return Boolean(
-    fileName &&
-    !fileName.includes('/') &&
-    isArchiveObjectKey(fileName) &&
-    fileName.includes(version) &&
-    objectMatchesArch(fileName, arch),
-  )
+  return matchesPackageMarketReleaseFileName(rule, fileName, version, arch, includeAll)
 }
 
-function flatObjectMatches(rule: PackageMarketRule, fileName: string, version: string, arch: string) {
-  const expectedNames = candidateFileNames(rule.fileNameFormats, version, arch)
-  if (expectedNames.includes(fileName)) return true
-  return Boolean(
-    fileName &&
-    !fileName.includes('/') &&
-    isArchiveObjectKey(fileName) &&
-    fileName.includes(version) &&
-    objectMatchesArch(fileName, arch),
-  )
+function flatObjectMatches(
+  rule: PackageMarketRule,
+  fileName: string,
+  version: string,
+  arch: string,
+  includeAll = false,
+) {
+  return matchesPackageMarketReleaseFileName(rule, fileName, version, arch, includeAll)
 }
 
-function ciObjectMatches(rule: PackageMarketRule, fileName: string, hash: string, arch: string) {
-  const expectedNames = ciCandidateFileNames(rule, hash, arch)
-  if (expectedNames.includes(fileName)) return true
-  return Boolean(
-    fileName &&
-    !fileName.includes('/') &&
-    isArchiveObjectKey(fileName) &&
-    (fileName.includes(hash) || fileName.includes('latest') || fileName.includes('main')) &&
-    objectMatchesArch(fileName, arch),
-  )
+function ciObjectMatches(
+  rule: PackageMarketRule,
+  fileName: string,
+  hash: string,
+  arch: string,
+  includeAll = false,
+) {
+  return matchesPackageMarketCiFileName(rule, fileName, hash, arch, includeAll)
 }
 
 function ruleAllowsObjectKey(rule: PackageMarketRule, objectKey: string) {
@@ -552,6 +577,7 @@ function objectToLink(
   version: string,
   object: OssObject,
   expireSeconds = downloadExpireSeconds,
+  downloadable = true,
 ): PackageMarketLink {
   return {
     name,
@@ -559,9 +585,9 @@ function objectToLink(
     objectKey: object.name,
     size: object.size,
     lastModified: object.lastModified,
-    downloadUrl: signedDownloadUrl(client, object.name, expireSeconds),
-    expiresAt: new Date(Date.now() + expireSeconds * 1000).toISOString(),
-    expiresInSeconds: expireSeconds,
+    downloadUrl: downloadable ? signedDownloadUrl(client, object.name, expireSeconds) : '',
+    expiresAt: downloadable ? new Date(Date.now() + expireSeconds * 1000).toISOString() : '',
+    expiresInSeconds: downloadable ? expireSeconds : 0,
   }
 }
 
@@ -798,28 +824,29 @@ function ciHashFromObject(root: string, objectKey: string) {
   return parts.length > 1 ? normalizeString(parts[0]) : ''
 }
 
-function ciCandidateFileNames(rule: PackageMarketRule, hash: string, arch: string) {
-  const formats =
-    rule.ciFileNameFormats.length > 0 ? rule.ciFileNameFormats : rule.fileNameFormats
-  return candidateFileNames(formats, hash, arch)
-}
-
 function dependencyHashFromObject(root: string, objectKey: string) {
   const rest = objectKey.slice(root.length)
   const parts = rest.split('/')
   return parts.length > 1 ? normalizeString(parts[0]) : ''
 }
 
-function dependencyObjectMatches(rule: PackageMarketRule, fileName: string, hash: string, arch: string) {
+function dependencyObjectMatches(
+  rule: PackageMarketRule,
+  fileName: string,
+  hash: string,
+  arch: string,
+  includeAll = false,
+) {
   if (!fileName || fileName.includes('/')) return false
   const expectedNames = candidateFileNames(rule.dependencyFilePatterns, hash, arch)
   if (expectedNames.includes(fileName)) return true
+  if (!includeAll) return false
   if (fileName.endsWith('.xlsx')) return true
   if (fileName.endsWith(`.${arch}.txt`)) return true
   return isArchiveObjectKey(fileName) && fileName.includes(hash) && objectMatchesArch(fileName, arch)
 }
 
-async function listDependencyVersions(client: OSS, rule: PackageMarketRule, arch: string) {
+async function listDependencyVersions(client: OSS, rule: PackageMarketRule, arch: string, includeAll = false) {
   const versions = new Map<string, { hash: string; object: OssObject }>()
   for (const root of rule.dependencyRoots) {
     const objects = await listAllObjects(client, root)
@@ -827,7 +854,7 @@ async function listDependencyVersions(client: OSS, rule: PackageMarketRule, arch
       const hash = dependencyHashFromObject(root, object.name)
       if (!hash) continue
       const fileName = object.name.slice(`${root}${hash}/`.length)
-      if (!dependencyObjectMatches(rule, fileName, hash, arch)) continue
+      if (!dependencyObjectMatches(rule, fileName, hash, arch, includeAll)) continue
       const current = versions.get(hash)
       if (!current || objectTime(object) > objectTime(current.object)) {
         versions.set(hash, { hash, object })
@@ -849,9 +876,10 @@ async function buildDependencyPackage(
   rule: PackageMarketRule,
   arch: string,
   requestedHash: string,
+  includeAll = false,
   expireSeconds = downloadExpireSeconds,
 ): Promise<PackageMarketDetail> {
-  const versions = await listDependencyVersions(client, rule, arch)
+  const versions = await listDependencyVersions(client, rule, arch, includeAll)
   const hash = normalizeString(requestedHash) || versions[0]?.hash || ''
   const matched: OssObject[] = []
   if (hash) {
@@ -859,7 +887,7 @@ async function buildDependencyPackage(
       const objects = await listAllObjects(client, `${root}${hash}/`)
       for (const object of objects) {
         const fileName = object.name.slice(`${root}${hash}/`.length)
-        if (dependencyObjectMatches(rule, fileName, hash, arch)) {
+        if (dependencyObjectMatches(rule, fileName, hash, arch, includeAll)) {
           matched.push(object)
         }
       }
@@ -877,7 +905,16 @@ async function buildDependencyPackage(
     ],
     ciVersions: versions,
     selectedHash: hash,
-    links: matched.map((object) => objectToLink(client, rule.name, selected?.label || hash, object, expireSeconds)),
+    links: matched.map((object) =>
+      objectToLink(
+        client,
+        rule.name,
+        selected?.label || hash,
+        object,
+        expireSeconds,
+        isAllowedPackageMarketObjectKey(object.name),
+      ),
+    ),
   }
 }
 
@@ -1130,6 +1167,7 @@ async function listReleaseVersions(
   client: OSS,
   rule: PackageMarketRule,
   arch: string,
+  includeAll = false,
 ) {
   const versions = new Map<string, { object: OssObject; version: string }>()
 
@@ -1138,7 +1176,7 @@ async function listReleaseVersions(
     for (const object of objects) {
       const version = releaseVersionFromObject(root, object.name)
       if (!version) continue
-      if (!releaseObjectMatches(rule, root, object, version, arch)) continue
+      if (!releaseObjectMatches(rule, root, object, version, arch, includeAll)) continue
       const current = versions.get(version)
       if (!current || objectTime(object) > objectTime(current.object)) {
         versions.set(version, { version, object })
@@ -1153,7 +1191,7 @@ async function listReleaseVersions(
       if (!fileName || fileName.includes('/')) continue
       const version = extractFlatVersion(rule, fileName, arch)
       if (!version) continue
-      if (!flatObjectMatches(rule, fileName, version, arch)) continue
+      if (!flatObjectMatches(rule, fileName, version, arch, includeAll)) continue
       const current = versions.get(version)
       if (!current || objectTime(object) > objectTime(current.object)) {
         versions.set(version, { version, object })
@@ -1170,7 +1208,13 @@ async function listReleaseVersions(
     }))
 }
 
-async function listCiVersionsFromRoots(client: OSS, rule: PackageMarketRule, arch: string, roots: string[]) {
+async function listCiVersionsFromRoots(
+  client: OSS,
+  rule: PackageMarketRule,
+  arch: string,
+  roots: string[],
+  includeAll = false,
+) {
   const versions = new Map<string, { hash: string; object: OssObject }>()
 
   for (const root of roots) {
@@ -1179,7 +1223,7 @@ async function listCiVersionsFromRoots(client: OSS, rule: PackageMarketRule, arc
       const hash = ciHashFromObject(root, object.name)
       if (!hash) continue
       const fileName = object.name.slice(`${root}${hash}/`.length)
-      if (!ciObjectMatches(rule, fileName, hash, arch)) continue
+      if (!ciObjectMatches(rule, fileName, hash, arch, includeAll)) continue
       const current = versions.get(hash)
       if (!current || objectTime(object) > objectTime(current.object)) {
         versions.set(hash, { hash, object })
@@ -1196,9 +1240,15 @@ async function listCiVersionsFromRoots(client: OSS, rule: PackageMarketRule, arc
     }))
 }
 
-async function listCiVersions(client: OSS, rule: PackageMarketRule, arch: string, ciBranch: string) {
+async function listCiVersions(
+  client: OSS,
+  rule: PackageMarketRule,
+  arch: string,
+  ciBranch: string,
+  includeAll = false,
+) {
   const { roots } = await resolveCiRoots(client, rule, ciBranch)
-  return listCiVersionsFromRoots(client, rule, arch, roots)
+  return listCiVersionsFromRoots(client, rule, arch, roots, includeAll)
 }
 
 async function buildCiPackage(
@@ -1207,10 +1257,11 @@ async function buildCiPackage(
   arch: string,
   requestedBranch: string,
   requestedHash: string,
+  includeAll = false,
   expireSeconds = downloadExpireSeconds,
 ): Promise<PackageMarketDetail> {
   const { branch, roots } = await resolveCiRoots(client, rule, requestedBranch)
-  const versions = await listCiVersionsFromRoots(client, rule, arch, roots)
+  const versions = await listCiVersionsFromRoots(client, rule, arch, roots, includeAll)
   const hash = normalizeString(requestedHash) || versions[0]?.hash || ''
   const matched: OssObject[] = []
 
@@ -1219,7 +1270,7 @@ async function buildCiPackage(
       const objects = await listAllObjects(client, `${root}${hash}/`)
       for (const object of objects) {
         const fileName = object.name.slice(`${root}${hash}/`.length)
-        if (ciObjectMatches(rule, fileName, hash, arch)) {
+        if (ciObjectMatches(rule, fileName, hash, arch, includeAll)) {
           matched.push(object)
         }
       }
@@ -1237,7 +1288,16 @@ async function buildCiPackage(
       { label: '下载有效期', value: `${Math.round(expireSeconds / 60)} 分钟` },
     ],
     ciVersions: versions,
-    links: matched.map((object) => objectToLink(client, rule.name, selected?.label || hash, object, expireSeconds)),
+    links: matched.map((object) =>
+      objectToLink(
+        client,
+        rule.name,
+        selected?.label || hash,
+        object,
+        expireSeconds,
+        isAllowedPackageMarketObjectKey(object.name),
+      ),
+    ),
   }
 }
 
@@ -1249,13 +1309,14 @@ async function buildComboPackage(
   channel: 'release' | 'ci',
   ciBranch: string,
   ciVersion: string,
+  includeAll = false,
   expireSeconds = downloadExpireSeconds,
 ): Promise<PackageMarketDetail> {
   if (channel === 'ci') {
     if (rule.category === 'dependency' && rule.dependencyRoots.length > 0) {
-      return buildDependencyPackage(client, rule, arch, ciVersion, expireSeconds)
+      return buildDependencyPackage(client, rule, arch, ciVersion, includeAll, expireSeconds)
     }
-    return buildCiPackage(client, rule, arch, ciBranch, ciVersion, expireSeconds)
+    return buildCiPackage(client, rule, arch, ciBranch, ciVersion, includeAll, expireSeconds)
   }
 
   const matched: Array<{ object: OssObject; version: string }> = []
@@ -1264,7 +1325,7 @@ async function buildComboPackage(
     for (const object of objects) {
       const version = releaseVersionFromObject(root, object.name)
       if (!version) continue
-      if (releaseObjectMatches(rule, root, object, version, arch)) {
+      if (releaseObjectMatches(rule, root, object, version, arch, includeAll)) {
         matched.push({ version, object })
       }
     }
@@ -1277,13 +1338,13 @@ async function buildComboPackage(
       if (!fileName || fileName.includes('/')) continue
       const version = extractFlatVersion(rule, fileName, arch)
       if (!version) continue
-      if (flatObjectMatches(rule, fileName, version, arch)) {
+      if (flatObjectMatches(rule, fileName, version, arch, includeAll)) {
         matched.push({ version, object })
       }
     }
   }
 
-  const releaseVersions = await listReleaseVersions(client, rule, arch)
+  const releaseVersions = await listReleaseVersions(client, rule, arch, includeAll)
   const latest =
     normalizeVersion(releaseVersion) || releaseVersions[0]?.version || newestVersion(matched)
   const latestObjects = matched.filter((item) => item.version === latest)
@@ -1297,7 +1358,16 @@ async function buildComboPackage(
       { label: '下载有效期', value: `${Math.round(expireSeconds / 60)} 分钟` },
     ],
     releaseVersions,
-    links: latestObjects.map((item) => objectToLink(client, rule.name, item.version, item.object, expireSeconds)),
+    links: latestObjects.map((item) =>
+      objectToLink(
+        client,
+        rule.name,
+        item.version,
+        item.object,
+        expireSeconds,
+        isAllowedPackageMarketObjectKey(item.object.name),
+      ),
+    ),
   }
 }
 
@@ -1334,12 +1404,14 @@ export async function getPackageMarketDetail(params: {
   ciVersion?: string
   deployType?: string
   expireMinutes?: number
+  includeAll?: boolean
   packageId: string
   releaseVersion?: string
 }) {
   const client = ossClient()
   const arch = normalizeString(params.arch || 'amd64').toLowerCase()
   const expireSeconds = normalizeDownloadExpireSeconds(params.expireMinutes)
+  const includeAll = params.includeAll === true
   if (params.packageId === 'base-pro' || params.packageId === 'base-oss') {
     const deployType = params.packageId === 'base-oss' ? 'oss' : 'pro'
     return buildBasePackage(
@@ -1371,6 +1443,7 @@ export async function getPackageMarketDetail(params: {
     params.channel,
     params.ciBranch || '',
     params.ciVersion || '',
+    includeAll,
     expireSeconds,
   )
 }
@@ -1378,6 +1451,7 @@ export async function getPackageMarketDetail(params: {
 export async function listPackageMarketReleaseVersions(params: {
   arch: string
   deployType?: string
+  includeAll?: boolean
   packageId: string
 }) {
   const client = ossClient()
@@ -1403,12 +1477,13 @@ export async function listPackageMarketReleaseVersions(params: {
   if (rule.category === 'dependency' && rule.dependencyRoots.length > 0) {
     return []
   }
-  return listReleaseVersions(client, rule, arch)
+  return listReleaseVersions(client, rule, arch, params.includeAll === true)
 }
 
 export async function listPackageMarketCiVersions(params: {
   arch: string
   ciBranch?: string
+  includeAll?: boolean
   packageId: string
 }) {
   const client = ossClient()
@@ -1423,9 +1498,9 @@ export async function listPackageMarketCiVersions(params: {
     throw new Error(`unknown package: ${params.packageId}`)
   }
   if (rule.category === 'dependency' && rule.dependencyRoots.length > 0) {
-    return listDependencyVersions(client, rule, arch)
+    return listDependencyVersions(client, rule, arch, params.includeAll === true)
   }
-  return listCiVersions(client, rule, arch, params.ciBranch || '')
+  return listCiVersions(client, rule, arch, params.ciBranch || '', params.includeAll === true)
 }
 
 export async function listPackageMarketCiBranches(params: { packageId: string }) {

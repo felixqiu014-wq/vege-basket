@@ -3659,6 +3659,7 @@ function App() {
     ciVersion?: string
     deployType?: 'pro' | 'oss'
     expireMinutes?: number
+    includeAll?: boolean
     packageId: string
     releaseVersion?: string
   }): Promise<PackageMarketDetail> {
@@ -3668,6 +3669,7 @@ function App() {
         channel: payload.channel,
         deployType: payload.packageId === 'base-oss' ? 'oss' : 'pro',
         expireMinutes: payload.expireMinutes,
+        includeAll: payload.includeAll,
         releaseVersion: payload.releaseVersion,
       })
     }
@@ -3684,12 +3686,14 @@ function App() {
     ciBranch?: string
     kind: 'ci' | 'release'
     deployType?: 'pro' | 'oss'
+    includeAll?: boolean
     packageId: string
   }): Promise<PackageMarketVersion[]> {
     if (payload.kind === 'ci') {
       return (await fetchPackageMarketCiVersions({
         arch: payload.arch,
         ciBranch: payload.ciBranch,
+        includeAll: payload.includeAll,
         packageId: payload.packageId,
       })).versions
     }
@@ -3698,6 +3702,7 @@ function App() {
       return (await fetchPackageMarketBaseReleaseVersions({
         arch: payload.arch,
         deployType: payload.packageId === 'base-oss' ? 'oss' : 'pro',
+        includeAll: payload.includeAll,
       })).versions
     }
 
@@ -5880,6 +5885,7 @@ function ProjectDetail({
     ciBranch?: string
     ciVersion?: string
     deployType?: 'pro' | 'oss'
+    includeAll?: boolean
     packageId: string
     releaseVersion?: string
   }) => Promise<PackageMarketDetail>
@@ -5894,6 +5900,7 @@ function ProjectDetail({
     ciBranch?: string
     kind: 'ci' | 'release'
     deployType?: 'pro' | 'oss'
+    includeAll?: boolean
     packageId: string
   }) => Promise<PackageMarketVersion[]>
   onSaveInstallEvent: (

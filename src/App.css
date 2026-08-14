@@ -8956,7 +8956,7 @@ textarea:focus {
 
 .package-market-sidebar {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
 }
@@ -9080,6 +9080,16 @@ textarea:focus {
 .package-market-controls [data-slot='select-trigger'] {
   height: 36px;
   min-height: 36px;
+}
+
+.package-market-show-all {
+  width: 100%;
+  justify-content: center;
+}
+
+.package-market-link-readonly {
+  color: var(--muted-text);
+  font-size: 12px;
 }
 
 .package-market-detail-area {

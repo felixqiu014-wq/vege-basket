@@ -1507,6 +1507,7 @@ export function fetchPackageMarketBaseDetail(payload: {
   channel: PackageMarketChannel
   deployType: 'pro' | 'oss'
   expireMinutes?: number
+  includeAll?: boolean
   releaseVersion?: string
 }) {
   const params = new URLSearchParams({
@@ -1515,6 +1516,7 @@ export function fetchPackageMarketBaseDetail(payload: {
     deployType: payload.deployType,
   })
   if (payload.expireMinutes) params.set('expireMinutes', String(payload.expireMinutes))
+  if (payload.includeAll) params.set('includeAll', 'true')
   if (payload.releaseVersion) params.set('releaseVersion', payload.releaseVersion)
   return request<PackageMarketDetail>(`/api/package-market/packages/base?${params.toString()}`)
 }
@@ -1522,11 +1524,13 @@ export function fetchPackageMarketBaseDetail(payload: {
 export function fetchPackageMarketBaseReleaseVersions(payload: {
   arch: string
   deployType: 'pro' | 'oss'
+  includeAll?: boolean
 }) {
   const params = new URLSearchParams({
     arch: payload.arch,
     deployType: payload.deployType,
   })
+  if (payload.includeAll) params.set('includeAll', 'true')
   return request<{ versions: PackageMarketVersion[] }>(
     `/api/package-market/packages/base/release-versions?${params.toString()}`,
   )
@@ -1539,6 +1543,7 @@ export function fetchPackageMarketDetail(payload: {
   ciVersion?: string
   deployType?: string
   expireMinutes?: number
+  includeAll?: boolean
   packageId: string
   releaseVersion?: string
 }) {
@@ -1550,6 +1555,7 @@ export function fetchPackageMarketDetail(payload: {
   if (payload.ciVersion) params.set('ciVersion', payload.ciVersion)
   if (payload.deployType) params.set('deployType', payload.deployType)
   if (payload.expireMinutes) params.set('expireMinutes', String(payload.expireMinutes))
+  if (payload.includeAll) params.set('includeAll', 'true')
   if (payload.releaseVersion) params.set('releaseVersion', payload.releaseVersion)
   return request<PackageMarketDetail>(
     `/api/package-market/packages/${encodeURIComponent(payload.packageId)}?${params.toString()}`,
@@ -1559,10 +1565,12 @@ export function fetchPackageMarketDetail(payload: {
 export function fetchPackageMarketReleaseVersions(payload: {
   arch: string
   deployType?: string
+  includeAll?: boolean
   packageId: string
 }) {
   const params = new URLSearchParams({ arch: payload.arch })
   if (payload.deployType) params.set('deployType', payload.deployType)
+  if (payload.includeAll) params.set('includeAll', 'true')
   return request<{ versions: PackageMarketVersion[] }>(
     `/api/package-market/packages/${encodeURIComponent(payload.packageId)}/release-versions?${params.toString()}`,
   )
@@ -1574,9 +1582,15 @@ export function fetchPackageMarketCiBranches(payload: { packageId: string }) {
   )
 }
 
-export function fetchPackageMarketCiVersions(payload: { arch: string; ciBranch?: string; packageId: string }) {
+export function fetchPackageMarketCiVersions(payload: {
+  arch: string
+  ciBranch?: string
+  includeAll?: boolean
+  packageId: string
+}) {
   const params = new URLSearchParams({ arch: payload.arch })
   if (payload.ciBranch) params.set('ciBranch', payload.ciBranch)
+  if (payload.includeAll) params.set('includeAll', 'true')
   return request<{ versions: PackageMarketVersion[] }>(
     `/api/package-market/packages/${encodeURIComponent(payload.packageId)}/ci-versions?${params.toString()}`,
   )

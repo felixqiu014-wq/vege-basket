@@ -3370,6 +3370,10 @@ function ensurePackageMarketExpireMinutes(value: unknown) {
   return normalizePackageMarketExpireMinutes(value)
 }
 
+function ensurePackageMarketIncludeAll(value: unknown) {
+  return value === 'true'
+}
+
 type SqlExecutor = (text: string, params: unknown[]) => Promise<unknown>
 
 async function linkPendingMembershipsWithExecutor(
@@ -10826,6 +10830,7 @@ app.get('/api/package-market/packages/base', asyncHandler(async (request, respon
     arch: String(request.query.arch ?? 'amd64'),
     channel: ensurePackageMarketChannel(request.query.channel),
     expireMinutes: ensurePackageMarketExpireMinutes(request.query.expireMinutes),
+    includeAll: ensurePackageMarketIncludeAll(request.query.includeAll),
     releaseVersion: String(request.query.releaseVersion ?? request.query.version ?? ''),
   }))
 }))
@@ -10839,6 +10844,7 @@ app.get('/api/package-market/packages/base/release-versions', asyncHandler(async
       packageId,
       deployType: String(request.query.deployType ?? ''),
       arch: String(request.query.arch ?? 'amd64'),
+      includeAll: ensurePackageMarketIncludeAll(request.query.includeAll),
     }),
   })
 }))
@@ -10854,6 +10860,7 @@ app.get('/api/package-market/packages/:packageId', asyncHandler(async (request, 
     ciBranch: String(request.query.ciBranch ?? ''),
     ciVersion: String(request.query.ciVersion ?? ''),
     expireMinutes: ensurePackageMarketExpireMinutes(request.query.expireMinutes),
+    includeAll: ensurePackageMarketIncludeAll(request.query.includeAll),
     releaseVersion: String(request.query.releaseVersion ?? ''),
   }))
 }))
@@ -10876,6 +10883,7 @@ app.get('/api/package-market/packages/:packageId/ci-versions', asyncHandler(asyn
       packageId: String(request.params.packageId),
       arch: String(request.query.arch ?? 'amd64'),
       ciBranch: String(request.query.ciBranch ?? ''),
+      includeAll: ensurePackageMarketIncludeAll(request.query.includeAll),
     }),
   })
 }))
@@ -10887,6 +10895,7 @@ app.get('/api/package-market/packages/:packageId/release-versions', asyncHandler
     versions: await listPackageMarketReleaseVersions({
       packageId: String(request.params.packageId),
       arch: String(request.query.arch ?? 'amd64'),
+      includeAll: ensurePackageMarketIncludeAll(request.query.includeAll),
       deployType: String(request.query.deployType ?? ''),
     }),
   })
