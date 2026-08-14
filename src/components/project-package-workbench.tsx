@@ -1068,7 +1068,7 @@ export function PackageMarketBrowser({
                             type="button"
                             className={rule.id === marketSelectedPackage ? 'package-market-rule active' : 'package-market-rule'}
                             onClick={() => {
-                              const nextChannel = marketChannel
+                              const nextChannel = rule.id === 'base-oss' ? 'release' : marketChannel
                               setMarketSelectedPackage(rule.id)
                               setMarketChannel(nextChannel)
                               setMarketReleaseVersion('')
@@ -1114,7 +1114,9 @@ export function PackageMarketBrowser({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="release">正式包</SelectItem>
-                    <SelectItem value="ci">测试包</SelectItem>
+                    {marketSelectedPackage !== 'base-oss' ? (
+                      <SelectItem value="ci">测试包</SelectItem>
+                    ) : null}
                   </SelectContent>
                 </Select>
               </Label>
@@ -4085,7 +4087,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                               type="button"
                               className={rule.id === marketSelectedPackage ? 'package-market-rule active' : 'package-market-rule'}
                               onClick={() => {
-                                const nextChannel = marketChannel
+                                const nextChannel = rule.id === 'base-oss' ? 'release' : marketChannel
                                 setMarketSelectedPackage(rule.id)
                                 setMarketChannel(nextChannel)
                                 setMarketReleaseVersion('')
@@ -4131,7 +4133,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="release">正式包</SelectItem>
-                      <SelectItem value="ci">测试包</SelectItem>
+                      {marketSelectedPackage !== 'base-oss' ? (
+                        <SelectItem value="ci">测试包</SelectItem>
+                      ) : null}
                     </SelectContent>
                   </Select>
                 </Label>

@@ -191,7 +191,7 @@ test('returns bundled package market rules without OSS credentials', async () =>
   }
 })
 
-test('allows sealos base and temporary packages through APPS release rules', () => {
+test('allows sealos base packages through APPS release rules', () => {
   assert.equal(
     isAllowedPackageMarketObjectKey(
       'offline/pro/release/v5.1.2/sealos-pro-v5.1.2-amd64.tar.gz',
@@ -206,25 +206,13 @@ test('allows sealos base and temporary packages through APPS release rules', () 
   )
   assert.equal(
     isAllowedPackageMarketObjectKey(
-      'offline/pro/release/v5.1.2/sealos-pro-cluster-v5.1.2-amd64.tar.gz',
-    ),
-    true,
-  )
-  assert.equal(
-    isAllowedPackageMarketObjectKey(
-      'offline/oss/release/v5.1.2/sealos-oss-cluster-v5.1.2-arm64.tar.gz',
-    ),
-    true,
-  )
-  assert.equal(
-    isAllowedPackageMarketObjectKey(
       'offline/pro/release/v5.1.2/unconfigured-package-v5.1.2-amd64.tar.gz',
     ),
     false,
   )
 })
 
-test('allows sealos base and temporary packages through standard APPS CI rules', () => {
+test('allows sealos base and release-branch packages through APPS CI rules', () => {
   assert.equal(
     isAllowedPackageMarketObjectKey(
       'offline/pro/ci/main/882f04e/sealos-pro-main-882f04e-amd64.tar.gz',
@@ -239,13 +227,7 @@ test('allows sealos base and temporary packages through standard APPS CI rules',
   )
   assert.equal(
     isAllowedPackageMarketObjectKey(
-      'offline/pro/ci/main/882f04e/sealos-pro-cluster-main-882f04e-amd64.tar.gz',
-    ),
-    true,
-  )
-  assert.equal(
-    isAllowedPackageMarketObjectKey(
-      'offline/oss/ci/main/882f04e/sealos-oss-cluster-latest-882f04e-amd64.tar.gz',
+      'offline/pro/ci/release-v5.1/493cbc5/sealos-pro-release-v5.1-493cbc5-amd64.tar',
     ),
     true,
   )
