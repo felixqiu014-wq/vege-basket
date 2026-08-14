@@ -3667,6 +3667,8 @@ function App() {
       return fetchPackageMarketBaseDetail({
         arch: payload.arch,
         channel: payload.channel,
+        ciBranch: payload.ciBranch,
+        ciVersion: payload.ciVersion,
         deployType: payload.packageId === 'base-oss' ? 'oss' : 'pro',
         expireMinutes: payload.expireMinutes,
         includeAll: payload.includeAll,

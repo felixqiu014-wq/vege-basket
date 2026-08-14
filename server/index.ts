@@ -10827,7 +10827,9 @@ app.get('/api/package-market/packages/base', asyncHandler(async (request, respon
   response.json(await getPackageMarketDetail({
     packageId,
     arch: String(request.query.arch ?? 'amd64'),
-    channel: 'release',
+    channel: ensurePackageMarketChannel(request.query.channel),
+    ciBranch: String(request.query.ciBranch ?? ''),
+    ciVersion: String(request.query.ciVersion ?? ''),
     expireMinutes: ensurePackageMarketExpireMinutes(request.query.expireMinutes),
     includeAll: ensurePackageMarketIncludeAll(request.query.includeAll),
     releaseVersion: String(request.query.releaseVersion ?? request.query.version ?? ''),

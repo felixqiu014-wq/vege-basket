@@ -1505,6 +1505,8 @@ export function fetchPackageMarketRules() {
 export function fetchPackageMarketBaseDetail(payload: {
   arch: string
   channel: PackageMarketChannel
+  ciBranch?: string
+  ciVersion?: string
   deployType: 'pro' | 'oss'
   expireMinutes?: number
   includeAll?: boolean
@@ -1515,6 +1517,8 @@ export function fetchPackageMarketBaseDetail(payload: {
     channel: payload.channel,
     deployType: payload.deployType,
   })
+  if (payload.ciBranch) params.set('ciBranch', payload.ciBranch)
+  if (payload.ciVersion) params.set('ciVersion', payload.ciVersion)
   if (payload.expireMinutes) params.set('expireMinutes', String(payload.expireMinutes))
   if (payload.includeAll) params.set('includeAll', 'true')
   if (payload.releaseVersion) params.set('releaseVersion', payload.releaseVersion)

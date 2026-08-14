@@ -1068,10 +1068,7 @@ export function PackageMarketBrowser({
                             type="button"
                             className={rule.id === marketSelectedPackage ? 'package-market-rule active' : 'package-market-rule'}
                             onClick={() => {
-                              const nextChannel =
-                                rule.id === 'base-pro' || rule.id === 'base-oss'
-                                  ? 'release'
-                                  : marketChannel
+                              const nextChannel = marketChannel
                               setMarketSelectedPackage(rule.id)
                               setMarketChannel(nextChannel)
                               setMarketReleaseVersion('')
@@ -1117,9 +1114,7 @@ export function PackageMarketBrowser({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="release">正式包</SelectItem>
-                    {marketSelectedPackage !== 'base-pro' && marketSelectedPackage !== 'base-oss' ? (
-                      <SelectItem value="ci">测试包</SelectItem>
-                    ) : null}
+                    <SelectItem value="ci">测试包</SelectItem>
                   </SelectContent>
                 </Select>
               </Label>
@@ -4090,10 +4085,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                               type="button"
                               className={rule.id === marketSelectedPackage ? 'package-market-rule active' : 'package-market-rule'}
                               onClick={() => {
-                                const nextChannel =
-                                  rule.id === 'base-pro' || rule.id === 'base-oss'
-                                    ? 'release'
-                                    : marketChannel
+                                const nextChannel = marketChannel
                                 setMarketSelectedPackage(rule.id)
                                 setMarketChannel(nextChannel)
                                 setMarketReleaseVersion('')
@@ -4139,9 +4131,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="release">正式包</SelectItem>
-                      {marketSelectedPackage !== 'base-pro' && marketSelectedPackage !== 'base-oss' ? (
-                        <SelectItem value="ci">测试包</SelectItem>
-                      ) : null}
+                      <SelectItem value="ci">测试包</SelectItem>
                     </SelectContent>
                   </Select>
                 </Label>
