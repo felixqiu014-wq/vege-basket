@@ -691,7 +691,9 @@ export function PackageMarketBrowser({
   const groupedMarketRules = useMemo(() => {
     const base = filteredRules.filter((rule) => rule.id === 'base-pro' || rule.id === 'base-oss')
     const apps = filteredRules.filter(
-      (rule) => rule.category === 'apps' && rule.id !== 'base-pro' && rule.id !== 'base-oss',
+      (rule) =>
+        rule.category === 'apps' &&
+        !['base-pro', 'base-oss', 'sealos-pro', 'sealos-oss'].includes(rule.id),
     )
     const middleware = filteredRules.filter((rule) => rule.category === 'middleware')
     return { apps, base, middleware }
@@ -1889,7 +1891,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const groupedMarketRules = useMemo(() => {
     const base = filteredRules.filter((rule) => rule.id === 'base-pro' || rule.id === 'base-oss')
     const apps = filteredRules.filter(
-      (rule) => rule.category === 'apps' && rule.id !== 'base-pro' && rule.id !== 'base-oss',
+      (rule) =>
+        rule.category === 'apps' &&
+        !['base-pro', 'base-oss', 'sealos-pro', 'sealos-oss'].includes(rule.id),
     )
     const middleware = filteredRules.filter((rule) => rule.category === 'middleware')
     return { apps, base, middleware }
