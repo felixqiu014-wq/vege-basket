@@ -20,6 +20,12 @@ test('published event and package documents remain openable for read-only viewin
   })
 })
 
+test('package market rule-outside objects keep download actions', () => {
+  assert.doesNotMatch(workbenchSource, /当前规则不允许下载此对象/u)
+  assert.match(indexSource, /isSafePackageMarketObjectKey/u)
+  assert.doesNotMatch(indexSource, /isAllowedPackageMarketObjectKey/u)
+})
+
 test('draft event documents remain openable for editing', () => {
   assert.deepEqual(resolveExistingOperationInteraction(true), {
     disabled: false,

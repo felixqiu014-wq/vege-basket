@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   formatPackageMarketTimestamp,
   isAllowedPackageMarketObjectKey,
+  isSafePackageMarketObjectKey,
   listPackageMarketRules,
   matchesPackageMarketCiFileName,
   matchesPackageMarketReleaseFileName,
@@ -32,6 +33,23 @@ test('formats package market timestamps in Shanghai time', () => {
   )
 })
 
+test('allows safe archive keys outside configured rules for package downloads', () => {
+  assert.equal(
+    isSafePackageMarketObjectKey(
+      'offline/custom-app/releases/v9.9.9/custom-app-v9.9.9-amd64.tar.gz',
+    ),
+    true,
+  )
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/custom-app/releases/v9.9.9/custom-app-v9.9.9-amd64.tar.gz',
+    ),
+    false,
+  )
+  assert.equal(isSafePackageMarketObjectKey('offline/custom-app/../secret.tar.gz'), false)
+  assert.equal(isSafePackageMarketObjectKey('offline/custom-app/readme.txt'), false)
+})
+
 test('uses configured release formats by default and exposes the fallback only on request', () => {
   const rule = { fileNameFormats: ['devbox-v2-cluster-%s-%s.tar'] }
   const legacyName = 'devbox-v1-cluster-v5.1.2-amd64.tar'
@@ -53,6 +71,27 @@ test('uses configured CI formats by default and exposes the fallback only on req
   assert.equal(matchesPackageMarketCiFileName(rule, legacyName, '882202f', 'amd64', true), true)
   assert.equal(
     matchesPackageMarketCiFileName(rule, 'devbox-v2-cluster-main-882202f-amd64.tar', '882202f', 'amd64'),
+    true,
+  )
+})
+
+test('matches state-metrics main CI archives in strict mode', () => {
+  const rule = {
+    ciFileNameFormats: [
+      'state-metrics-cluster-latest-%s-%s.tar.gz',
+      'state-metrics-cluster-main-%s-%s.tar.gz',
+    ],
+    fileNameFormats: ['state-metrics-cluster-%s-%s.tar.gz'],
+  }
+  const fileName = 'state-metrics-cluster-main-00d66ac-amd64.tar.gz'
+  assert.equal(matchesPackageMarketCiFileName(rule, fileName, '00d66ac', 'amd64'), true)
+})
+
+test('allows the configured state-metrics main CI object key', () => {
+  assert.equal(
+    isAllowedPackageMarketObjectKey(
+      'offline/sealos-apps/state-metrics/ci/main/00d66ac/state-metrics-cluster-main-00d66ac-amd64.tar.gz',
+    ),
     true,
   )
 })

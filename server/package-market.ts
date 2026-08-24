@@ -460,7 +460,7 @@ function cacheClusterPackageAllowsObjectKey(objectKey: string) {
   ).test(fileName)
 }
 
-export function isAllowedPackageMarketObjectKey(value: unknown) {
+export function isSafePackageMarketObjectKey(value: unknown) {
   const objectKey = normalizeString(value)
   if (
     !objectKey ||
@@ -476,6 +476,13 @@ export function isAllowedPackageMarketObjectKey(value: unknown) {
   ) {
     return false
   }
+
+  return true
+}
+
+export function isAllowedPackageMarketObjectKey(value: unknown) {
+  const objectKey = normalizeString(value)
+  if (!isSafePackageMarketObjectKey(objectKey)) return false
 
   const rules = parseRulesFile()
   if (rules.some((rule) => ruleAllowsObjectKey(rule, objectKey))) {
@@ -925,7 +932,6 @@ async function buildDependencyPackage(
         selected?.label || hash,
         object,
         expireSeconds,
-        isAllowedPackageMarketObjectKey(object.name),
       ),
     ),
   }
@@ -1308,7 +1314,6 @@ async function buildCiPackage(
         selected?.label || hash,
         object,
         expireSeconds,
-        isAllowedPackageMarketObjectKey(object.name),
       ),
     ),
   }
@@ -1378,7 +1383,6 @@ async function buildComboPackage(
         item.version,
         item.object,
         expireSeconds,
-        isAllowedPackageMarketObjectKey(item.object.name),
       ),
     ),
   }
@@ -1534,14 +1538,14 @@ export async function listPackageMarketCiBranches(params: { packageId: string })
 }
 
 export function createPackageItemDownloadUrl(objectKey: string, expireMinutes?: number) {
-  if (!isAllowedPackageMarketObjectKey(objectKey)) {
+  if (!isSafePackageMarketObjectKey(objectKey)) {
     throw new Error('Package object key is not allowed')
   }
   return signedDownloadUrl(ossClient(), objectKey, normalizeDownloadExpireSeconds(expireMinutes))
 }
 
 export function createPackageItemDownloadLink(objectKey: string, expireMinutes?: number) {
-  if (!isAllowedPackageMarketObjectKey(objectKey)) {
+  if (!isSafePackageMarketObjectKey(objectKey)) {
     throw new Error('Package object key is not allowed')
   }
   const expiresInSeconds = normalizeDownloadExpireSeconds(expireMinutes)

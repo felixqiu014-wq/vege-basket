@@ -33,6 +33,8 @@ rules:
     ci_file_name_formats:
       - state-metrics-cluster-latest-%s-%s.tar
       - state-metrics-cluster-latest-%s-%s.tar.gz
+      - state-metrics-cluster-main-%s-%s.tar
+      - state-metrics-cluster-main-%s-%s.tar.gz
   kite:
     name: sealos-kite
     release_roots:

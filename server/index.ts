@@ -62,7 +62,7 @@ import {
   getOssObject,
   getPackageMarketDetail,
   getPackageMarketExpireMinutes,
-  isAllowedPackageMarketObjectKey,
+  isSafePackageMarketObjectKey,
   listPackageMarketCiBranches,
   listPackageMarketCiVersions,
   listPackageMarketReleaseVersions,
@@ -11201,7 +11201,7 @@ app.post('/api/projects/:projectId/package-timeline/events', asyncHandler(async 
     return
   }
   const aggregate = parseProjectPackageEventAggregateBody(request.body)
-  const rejectedItem = aggregate.items.find((item) => !isAllowedPackageMarketObjectKey(item.objectKey))
+  const rejectedItem = aggregate.items.find((item) => !isSafePackageMarketObjectKey(item.objectKey))
   if (rejectedItem) {
     response.status(400).json({ error: '安装包对象路径不在允许范围内' })
     return
@@ -11245,7 +11245,7 @@ app.put('/api/projects/:projectId/package-timeline/events/:eventId', asyncHandle
     return
   }
   const aggregate = parseProjectPackageEventAggregateBody(request.body)
-  if (aggregate.items.some((item) => !isAllowedPackageMarketObjectKey(item.objectKey))) {
+  if (aggregate.items.some((item) => !isSafePackageMarketObjectKey(item.objectKey))) {
     response.status(400).json({ error: '安装包对象路径不在允许范围内' })
     return
   }
@@ -11453,7 +11453,7 @@ app.post('/api/projects/:projectId/package-timeline/events/:eventId/packages', a
     : []
   const rejectedItems = items
     .map((item, index) => ({ index, item }))
-    .filter(({ item }) => !isAllowedPackageMarketObjectKey(item.objectKey))
+    .filter(({ item }) => !isSafePackageMarketObjectKey(item.objectKey))
     .map(({ index, item }) => ({
       index: index + 1,
       objectKey: item.objectKey,
@@ -11668,7 +11668,7 @@ app.get('/api/projects/:projectId/package-items/:itemId/download-url', asyncHand
     response.status(404).json({ error: 'Package item not found' })
     return
   }
-  if (!isAllowedPackageMarketObjectKey(objectKey)) {
+  if (!isSafePackageMarketObjectKey(objectKey)) {
     response.status(404).json({ error: 'Package item not found' })
     return
   }

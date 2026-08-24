@@ -960,13 +960,9 @@ export function PackageMarketBrowser({
         </div>
         <code>{link.objectKey}</code>
         <div className="package-market-link-footer">
-          {canDownload ? (
-            <a href={link.downloadUrl} target="_blank" rel="noreferrer">
-              查看临时链接
-            </a>
-          ) : (
-            <span className="package-market-link-readonly">当前规则不允许下载此对象</span>
-          )}
+          <a href={link.downloadUrl} target="_blank" rel="noreferrer">
+            查看临时链接
+          </a>
         </div>
       </article>
     )
@@ -2662,13 +2658,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
         </div>
         <code>{link.objectKey}</code>
         <div className="package-market-link-footer">
-          {canDownload ? (
-            <a href={link.downloadUrl} target="_blank" rel="noreferrer">
-              查看临时链接
-            </a>
-          ) : (
-            <span className="package-market-link-readonly">当前规则不允许下载此对象</span>
-          )}
+          <a href={link.downloadUrl} target="_blank" rel="noreferrer">
+            查看临时链接
+          </a>
           <Button
             className="ghost-button"
             variant="outline"
