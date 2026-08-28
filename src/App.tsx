@@ -2480,7 +2480,6 @@ function App() {
       return
     }
     let cancelled = false
-    setPackageMarketOrganizationsLoaded(false)
     fetchOrganizations()
       .then(({ organizations }) => {
         if (cancelled) return
@@ -2489,7 +2488,7 @@ function App() {
       })
       .catch(() => {
         if (cancelled) return
-        setPackageMarketOrganizations([])
+        // Keep the last confirmed availability during a transient refresh failure.
         setPackageMarketOrganizationsLoaded(true)
       })
     return () => {
