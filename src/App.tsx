@@ -577,6 +577,7 @@ type TodoFilterCondition = {
 const themeStorageKey = 'veges.theme'
 const viewStorageKey = 'veges.activeView.v1'
 const selectedProjectStorageKey = 'veges.selectedProject.v1'
+const selectedOrganizationStorageKey = 'veges.selectedOrganization.v1'
 const todoCreateDraftStoragePrefix = 'veges.todoCreateDraft.v1'
 const todoFilterPreferenceStoragePrefix = 'veges.todoFilterPreference.v1'
 const assignedBugCommentReadStoragePrefix = 'veges.assignedBugCommentReadAt.v1'
@@ -640,6 +641,30 @@ function loadStoredSelectedProjectId(): number | null {
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
   } catch {
     return null
+  }
+}
+
+function loadStoredSelectedOrganizationId(userId: number): number | null | undefined {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const stored = window.localStorage.getItem(`${selectedOrganizationStorageKey}.${userId}`)
+    if (stored == null) return undefined
+    if (stored === 'personal') return null
+    const parsed = Number(stored)
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function persistSelectedOrganizationId(userId: number, organizationId: number | null) {
+  try {
+    window.localStorage.setItem(
+      `${selectedOrganizationStorageKey}.${userId}`,
+      organizationId == null ? 'personal' : String(organizationId),
+    )
+  } catch {
+    // The active selection remains available for this browser session.
   }
 }
 
@@ -1734,6 +1759,7 @@ function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme)
   const [loggedIn, setLoggedIn] = useState(Boolean(getAuthToken()))
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const authUserId = authUser?.id
   const bugShareToken = getBugShareTokenFromPath()
   const todoShareToken = getTodoShareTokenFromPath(window.location.pathname)
   const [bugShareLoginRequested, setBugShareLoginRequested] = useState(false)
@@ -1768,6 +1794,10 @@ function App() {
   }, [view])
 
   const [projects, setProjects] = useState(initialProjects)
+  const [organizations, setOrganizations] = useState<OrganizationListItem[]>([])
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState<number | null>(null)
+  const [organizationContextReady, setOrganizationContextReady] = useState(false)
+  const [organizationContextError, setOrganizationContextError] = useState('')
   const [todos, setTodos] = useState(initialTodos)
   const [memberships, setMemberships] = useState(initialMemberships)
   const [departedUserIds, setDepartedUserIds] = useState<number[]>([])
@@ -1798,6 +1828,7 @@ function App() {
   const [isProjectTodoDetailActive, setIsProjectTodoDetailActive] = useState(false)
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false)
   const [workspaceRefreshVersion, setWorkspaceRefreshVersion] = useState(0)
+  const [organizationRefreshVersion, setOrganizationRefreshVersion] = useState(0)
   const [workspaceError, setWorkspaceError] = useState('')
   const [projectDetailTab, setProjectDetailTab] = useState<ProjectDetailTab>('journal')
   const [journalDraft, setJournalDraft] = useState('')
@@ -1844,6 +1875,7 @@ function App() {
   const workspaceRefreshRequestIdRef = useRef(0)
   const workspaceRefreshPromiseRef = useRef<Promise<boolean> | null>(null)
   const workspaceHydratedRef = useRef(false)
+  const organizationContextReadyRef = useRef(false)
   const workspaceMutationEpochRef = useRef(0)
   const aiRequestIdRef = useRef(0)
   const authSessionGenerationRef = useRef(0)
@@ -2195,6 +2227,52 @@ function App() {
   }, [applyWorkspace, loggedIn, refreshNotifications])
 
   useEffect(() => {
+    if (!loggedIn || !authUserId) {
+      organizationContextReadyRef.current = false
+      setOrganizations([])
+      setSelectedOrganizationId(null)
+      setOrganizationContextReady(false)
+      setOrganizationContextError('')
+      return
+    }
+
+    let active = true
+    setOrganizationContextError('')
+    fetchOrganizations()
+      .then(({ organizations: nextOrganizations }) => {
+        if (!active) return
+        const storedOrganizationId = loadStoredSelectedOrganizationId(authUserId)
+        setOrganizations(nextOrganizations)
+        setSelectedOrganizationId((current) => {
+          if (
+            storedOrganizationId !== undefined &&
+            (storedOrganizationId == null || nextOrganizations.some((item) => item.id === storedOrganizationId))
+          ) {
+            return storedOrganizationId
+          }
+          if (current != null && nextOrganizations.some((item) => item.id === current)) {
+            return current
+          }
+          return nextOrganizations[0]?.id ?? null
+        })
+        organizationContextReadyRef.current = true
+        setOrganizationContextReady(true)
+      })
+      .catch((error) => {
+        if (!active) return
+        setOrganizationContextError(
+          error instanceof Error && error.message
+            ? error.message
+            : '组织列表读取失败，请刷新页面重试。',
+        )
+        if (!organizationContextReadyRef.current) setOrganizationContextReady(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [authUserId, loggedIn, organizationRefreshVersion])
+
+  useEffect(() => {
     if (!loggedIn || !authUser) return
 
     const historyRequestId = aiHistoryRequestIdRef.current + 1
@@ -2417,7 +2495,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [loggedIn, workspaceLoaded, workspaceRefreshVersion])
+  }, [loggedIn, organizationRefreshVersion, workspaceLoaded, workspaceRefreshVersion])
 
   const packageMarketVisible = packageMarketOrganizationsLoaded && packageMarketOrganizations.some(
     (organization) => organization.packageMarketEnabled,
@@ -2530,13 +2608,31 @@ function App() {
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
   }, [inviteToken, organizationInviteToken])
 
+  const scopedProjects = useMemo(
+    () => organizationContextReady
+      ? projects.filter((project) => (project.organizationId ?? null) === selectedOrganizationId)
+      : [],
+    [organizationContextReady, projects, selectedOrganizationId],
+  )
   const selectedProject =
-    projects.find((project) => project.id === selectedProjectId) ?? projects[0]
+    scopedProjects.find((project) => project.id === selectedProjectId) ?? scopedProjects[0]
+  const selectedOrganizationName = selectedOrganizationId == null
+    ? '个人项目'
+    : organizations.find((organization) => organization.id === selectedOrganizationId)?.name ?? '组织项目'
   const selectedProjectDraftId = selectedProject?.id
   const activeInvitePassword =
     inviteToken && invitePasswordRequired && invitePasswordVerified
       ? invitePasswordDraft.trim()
       : undefined
+
+  useEffect(() => {
+    setSelectedProjectId((current) => {
+      if (current != null && scopedProjects.some((project) => project.id === current)) {
+        return current
+      }
+      return scopedProjects[0]?.id ?? null
+    })
+  }, [scopedProjects])
 
   useEffect(() => {
     if (aiProjectId == null || projects.some((project) => project.id === aiProjectId)) return
@@ -2689,6 +2785,7 @@ function App() {
         setOrganizationInviteToken('')
         clearOrganizationInviteTokenFromUrl()
         setWorkspaceRefreshVersion((current) => current + 1)
+        setOrganizationRefreshVersion((current) => current + 1)
       })
       .catch(() => {
         setWorkspaceError('组织邀请链接无效或已失效。')
@@ -2703,6 +2800,7 @@ function App() {
       !loggedIn ||
       !workspaceLoaded ||
       !authUser ||
+      !organizationContextReady ||
       shouldDeferTodoDeepLinkForInvite(inviteToken, settledInviteToken) ||
       pendingTodoDeepLinkId == null
     ) return
@@ -2719,6 +2817,18 @@ function App() {
       return
     }
 
+    const targetProject = projects.find((project) => project.id === todo.projectId)
+    if (targetProject) {
+      const targetOrganizationId = targetProject.organizationId ?? null
+      if (
+        targetOrganizationId === null ||
+        organizations.some((organization) => organization.id === targetOrganizationId)
+      ) {
+        setSelectedOrganizationId(targetOrganizationId)
+        persistSelectedOrganizationId(authUser.id, targetOrganizationId)
+      }
+    }
+
     setDetailEntrySource('project')
     setRequestedTodoDetailId(todo.id)
     setRequestedPackageEventId(null)
@@ -2730,6 +2840,8 @@ function App() {
     authUser,
     inviteToken,
     loggedIn,
+    organizationContextReady,
+    organizations,
     pendingTodoDeepLinkId,
     projects,
     settledInviteToken,
@@ -2744,11 +2856,11 @@ function App() {
   const projectTodos = selectedProject
     ? todos.filter((todo) => todo.projectId === selectedProject.id)
     : []
-  const allTags = ['全部', ...Array.from(new Set(projects.flatMap((p) => p.tags)))]
+  const allTags = ['全部', ...Array.from(new Set(scopedProjects.flatMap((p) => p.tags)))]
 
   const filteredResults = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return projects
+    return scopedProjects
       .filter((project) => {
         const matchesStatus = statusFilter === 'all' || project.status === statusFilter
         const matchesTag = tagFilter === '全部' || project.tags.includes(tagFilter)
@@ -2778,7 +2890,7 @@ function App() {
         if (journalDiff !== 0) return journalDiff
         return right.id - left.id
       })
-  }, [projects, search, statusFilter, summaries, tagFilter, todos])
+  }, [scopedProjects, search, statusFilter, summaries, tagFilter, todos])
 
   const openNotificationCount = useMemo(
     () =>
@@ -3063,10 +3175,42 @@ function App() {
     }
   }
 
+  function setOrganizationContextForProject(projectId: number) {
+    const project = projects.find((item) => item.id === projectId)
+    if (!project) return
+    const nextOrganizationId = project.organizationId ?? null
+    if (
+      nextOrganizationId !== null &&
+      !organizations.some((organization) => organization.id === nextOrganizationId)
+    ) return
+    setSelectedOrganizationId(nextOrganizationId)
+    if (authUser) persistSelectedOrganizationId(authUser.id, nextOrganizationId)
+  }
+
+  function changeOrganization(value: string) {
+    const nextOrganizationId = value === 'personal' ? null : Number(value)
+    if (
+      nextOrganizationId !== null &&
+      (!Number.isSafeInteger(nextOrganizationId) ||
+        !organizations.some((organization) => organization.id === nextOrganizationId))
+    ) return
+
+    setSelectedOrganizationId(nextOrganizationId)
+    if (authUser) persistSelectedOrganizationId(authUser.id, nextOrganizationId)
+    setSelectedProjectId(null)
+    setRequestedTodoDetailId(null)
+    setRequestedPackageEventId(null)
+    setIsProjectTodoDetailActive(false)
+    setDetailEntrySource('project')
+    setProjectDetailTab('journal')
+    if (view === 'project') setView('search')
+  }
+
   function selectProject(projectId: number) {
     setDetailEntrySource('project')
     setRequestedTodoDetailId(null)
     setRequestedPackageEventId(null)
+    setOrganizationContextForProject(projectId)
     setSelectedProjectId(projectId)
     setJournalDraft('')
     setProjectDetailTab('journal')
@@ -3077,6 +3221,7 @@ function App() {
     setDetailEntrySource('my_work')
     setRequestedTodoDetailId(todoId)
     setRequestedPackageEventId(null)
+    setOrganizationContextForProject(projectId)
     setSelectedProjectId(projectId)
     setJournalDraft('')
     setProjectDetailTab('journal')
@@ -3086,6 +3231,7 @@ function App() {
   function selectMyWorkPackageEvent(projectId: number, eventId: number) {
     setDetailEntrySource('my_work')
     setRequestedTodoDetailId(null)
+    setOrganizationContextForProject(projectId)
     setRequestedPackageEventId(eventId)
     setSelectedProjectId(projectId)
     setJournalDraft('')
@@ -3158,6 +3304,7 @@ function App() {
     const data = await runMutation(() =>
       createProject({
         name,
+        organizationId: selectedOrganizationId ?? undefined,
         tags: tags.length > 0 ? tags : ['新项目'],
       }),
     )
@@ -3198,7 +3345,7 @@ function App() {
   }
 
   async function deleteProject(projectId: number) {
-    const nextProject = projects.find((project) => project.id !== projectId)
+    const nextProject = scopedProjects.find((project) => project.id !== projectId)
     await runMutation(() => removeProject(projectId))
     clearTodoCreateDraft(projectId, authUser?.id)
     setSelectedProjectId(nextProject?.id ?? 0)
@@ -3331,7 +3478,7 @@ function App() {
 
   async function addTodo(projectId?: number) {
     const targetProjectId = projectId ?? selectedProject?.id
-    const title = stripTodoMentions(todoDraft, getProjectMentionOptions(targetProjectId, projects, memberships)).trim()
+    const title = stripTodoMentions(todoDraft, getProjectMentionOptions(targetProjectId, scopedProjects, memberships)).trim()
     if (!title || !targetProjectId) return
     const data = await runMutation(() =>
       createTodo({
@@ -4433,8 +4580,8 @@ function App() {
 
   async function exportMarkdown(projectId?: number) {
     const targets = projectId
-      ? projects.filter((project) => project.id === projectId)
-      : projects.filter((project) => project.accessRole === 'owner')
+      ? scopedProjects.filter((project) => project.id === projectId)
+      : scopedProjects.filter((project) => project.accessRole === 'owner')
     const sections = await Promise.all(
       targets.map(async (project) => {
         const projectTodosText = todos
@@ -4485,7 +4632,7 @@ ${packageTimelineText}`
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = projectId ? `${targets[0]?.name}.md` : 'Veges-个人项目驾驶舱导出.md'
+    link.download = projectId ? `${targets[0]?.name}.md` : `Veges-${selectedOrganizationName}驾驶舱导出.md`
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -4586,8 +4733,8 @@ ${packageTimelineText}`
     )
   }
 
-  if (!workspaceLoaded && !authUser) {
-    return <WorkspaceBootScreen />
+  if (!workspaceLoaded || !organizationContextReady) {
+    return <WorkspaceBootScreen message={organizationContextError || undefined} />
   }
 
   const roleSelectionDialog = authUser ? (
@@ -4646,6 +4793,12 @@ ${packageTimelineText}`
               {openNotificationCount > 0 ? <span className="sidebar-notifications-dot" aria-hidden /> : null}
             </button>
           </div>
+          <OrganizationSwitcher
+            error={organizationContextError}
+            organizations={organizations}
+            selectedOrganizationId={selectedOrganizationId}
+            onChange={changeOrganization}
+          />
           <nav className="nav-list">
             <NavGroup label="日常工作" id="nav-group-daily">
               <NavButton active={view === 'search'} onClick={() => setView('search')}>
@@ -5123,7 +5276,7 @@ ${packageTimelineText}`
             project={selectedProject}
             currentUser={authUser}
             memberships={memberships}
-            projects={projects}
+            projects={scopedProjects}
             projectTodos={projectTodos}
             todoAssigneeUserId={todoAssigneeUserId}
             todoWatcherUserIds={todoWatcherUserIds}
@@ -5142,6 +5295,7 @@ ${packageTimelineText}`
             isNewProjectDialogOpen={isNewProjectDialogOpen}
             newProjectName={newProjectName}
             newProjectTags={newProjectTags}
+            scopeLabel={selectedOrganizationName}
             onAddProject={addProject}
             onNewProjectDialogOpenChange={changeNewProjectDialogOpen}
             onNewProjectNameChange={setNewProjectName}
@@ -5158,7 +5312,7 @@ ${packageTimelineText}`
             onAddInboxItem={addInboxItem}
             onDeleteInboxItem={deleteInboxItem}
             onDraftChange={setInboxDraft}
-            projects={projects}
+            projects={scopedProjects}
           />
         )}
 
@@ -5208,8 +5362,14 @@ ${packageTimelineText}`
         {view === 'organization' && authUser ? (
           <OrganizationWorkbench
             currentUser={authUser}
+            onOrganizationsChanged={() => setOrganizationRefreshVersion((current) => current + 1)}
             onPackageMarketVisibilityChange={(organizationId, enabled) => {
               setPackageMarketOrganizations((current) => current.map((organization) => (
+                organization.id === organizationId
+                  ? { ...organization, packageMarketEnabled: enabled }
+                  : organization
+              )))
+              setOrganizations((current) => current.map((organization) => (
                 organization.id === organizationId
                   ? { ...organization, packageMarketEnabled: enabled }
                   : organization
@@ -5312,18 +5472,58 @@ ${packageTimelineText}`
   )
 }
 
-function WorkspaceBootScreen() {
+function WorkspaceBootScreen({ message }: { message?: string }) {
   return (
     <main className="workspace-boot-screen" aria-busy="true">
       <div className="workspace-boot-panel">
         <img className="brand-mark" src="/favicon.svg" alt="Veges" />
         <div>
           <p className="eyebrow">Veges - 个人项目驾驶舱</p>
-          <h1>正在同步工作区</h1>
-          <p>稍等一下，正在连接线上数据。</p>
+          <h1>{message ? '组织列表读取失败' : '正在同步工作区'}</h1>
+          <p>{message || '稍等一下，正在连接线上数据。'}</p>
         </div>
       </div>
     </main>
+  )
+}
+
+function OrganizationSwitcher({
+  error,
+  organizations,
+  selectedOrganizationId,
+  onChange,
+}: {
+  error: string
+  organizations: OrganizationListItem[]
+  selectedOrganizationId: number | null
+  onChange: (value: string) => void
+}) {
+  const value = selectedOrganizationId == null ? 'personal' : String(selectedOrganizationId)
+  const selectedOrganization = organizations.find((organization) => organization.id === selectedOrganizationId)
+
+  return (
+    <div className="sidebar-organization-switcher">
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="sidebar-organization-select" aria-label="切换组织">
+          <span className="sidebar-organization-select-value">
+            <Buildings size={16} weight="duotone" aria-hidden />
+            <SelectValue placeholder="个人项目">
+              {selectedOrganization?.name || '个人项目'}
+            </SelectValue>
+          </span>
+        </SelectTrigger>
+        <SelectContent className="sidebar-organization-content">
+          <SelectItem value="personal">个人项目</SelectItem>
+          {organizations.length > 0 ? <SelectSeparator /> : null}
+          {organizations.map((organization) => (
+            <SelectItem key={organization.id} value={String(organization.id)}>
+              {organization.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {error ? <p className="sidebar-organization-error" role="alert">{error}</p> : null}
+    </div>
   )
 }
 
@@ -5758,6 +5958,7 @@ function EmptyWorkspace({
   isNewProjectDialogOpen,
   newProjectName,
   newProjectTags,
+  scopeLabel,
   onAddProject,
   onNewProjectDialogOpenChange,
   onNewProjectNameChange,
@@ -5766,6 +5967,7 @@ function EmptyWorkspace({
   isNewProjectDialogOpen: boolean
   newProjectName: string
   newProjectTags: string
+  scopeLabel: string
   onAddProject: () => void
   onNewProjectDialogOpenChange: (open: boolean) => void
   onNewProjectNameChange: (value: string) => void
@@ -5773,7 +5975,7 @@ function EmptyWorkspace({
 }) {
   return (
     <Card className="panel empty-workspace">
-      <p className="eyebrow">新的个人工作区</p>
+      <p className="eyebrow">{scopeLabel}工作区</p>
       <h3>先创建第一个项目篮子。</h3>
       <p>
         每个项目都会拥有自己的日记、待办、风险和总结。创建后就可以开始记录今天的上下文。
@@ -6506,6 +6708,7 @@ function ProjectDetail({
                 />
               ) : (
                 <TodoList
+                  canManageOrganizationTodos={project.canManageOrganizationTodos}
                   departedUserIds={departedUserIds}
                   key={`project-todos-${project.id}-${project.accessRole}-${currentUser?.id ?? 'anonymous'}`}
                   currentUserId={currentUser?.id}
@@ -6516,7 +6719,7 @@ function ProjectDetail({
                   onDeleteTodo={canWriteProject ? onDeleteTodo : undefined}
                   onDetailModeChange={setIsProjectTodoDetailOpen}
                   onDetailBack={notificationDetailActive ? onReturnToNotifications : undefined}
-                  onUpdateTodo={canWriteProject ? onUpdateTodo : undefined}
+                  onUpdateTodo={canWriteProject || project.canManageOrganizationTodos ? onUpdateTodo : undefined}
                   onUpdateTodoNote={canWriteProject ? onUpdateTodoNote : undefined}
                   project={project}
                   projects={projects}
@@ -11137,6 +11340,7 @@ function TodoEditorDialog({
   reviewerUserId,
   backLabel = '返回待办列表',
   canEdit = false,
+  canEditProperties = canEdit,
   canRespondToTodo = false,
   canShare = false,
   canCreateModule = false,
@@ -11184,6 +11388,7 @@ function TodoEditorDialog({
   reviewerUserId: number | null
   backLabel?: string
   canEdit?: boolean
+  canEditProperties?: boolean
   canRespondToTodo?: boolean
   canShare?: boolean
   canCreateModule?: boolean
@@ -11506,7 +11711,7 @@ function TodoEditorDialog({
         <div className="todo-editor-sidebar">
           <TodoPropertiesPanel
             assigneeUserId={assigneeUserId}
-            canEdit={canEdit}
+            canEdit={canEditProperties}
             canRespondToTodo={canRespondToTodo}
             createdAt={createdAt}
             dueDate={dueDate}
@@ -11604,6 +11809,7 @@ function TodoEditorDialog({
 }
 
 function TodoList({
+  canManageOrganizationTodos = false,
   compact = false,
   currentUserId,
   departedUserIds,
@@ -11620,6 +11826,7 @@ function TodoList({
   projects,
   todos,
 }: {
+  canManageOrganizationTodos?: boolean
   compact?: boolean
   currentUserId?: number
   departedUserIds: readonly number[]
@@ -11812,6 +12019,11 @@ function TodoList({
       currentUserId != null &&
       editingTodo.createdByUserId === currentUserId,
   )
+  const editingCanManageTodoFields = Boolean(
+    editingTodo && editingProject && (
+      canManageOrganizationTodos || editingCanManageTodo
+    ),
+  )
   const editingCanRespondToTodo = editingTodo ? canRespondToTodo(editingTodo) : false
 
   function canShareTodo(todo: Todo) {
@@ -11995,6 +12207,7 @@ function TodoList({
           priority={todoEditPriority}
           project={editingProject}
           canEdit={editingCanManageTodo}
+          canEditProperties={editingCanManageTodoFields}
           canRespondToTodo={editingCanRespondToTodo}
           canShare={canShareTodo(editingTodo)}
           currentUserId={currentUserId}
@@ -12029,7 +12242,7 @@ function TodoList({
           onSubmit={saveTodoEdit}
           onTitleChange={setTodoEditDraft}
           onInlineUpdate={(payload) => {
-            if ((!editingCanManageTodo && !editingCanRespondToTodo) || !onUpdateTodo) return
+            if ((!editingCanManageTodoFields && !editingCanRespondToTodo) || !onUpdateTodo) return
             onUpdateTodo(editingTodo.id, payload)
           }}
           onUpdateTodoNote={onUpdateTodoNote}

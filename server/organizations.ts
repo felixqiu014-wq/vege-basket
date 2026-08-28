@@ -819,7 +819,6 @@ async function getOrganizationDetail(organizationId: number, userId: number) {
     })
     membershipsByProject.set(projectId, memberships)
   }
-
   return {
     accessRole: membership.access_role,
     departedUserIds,

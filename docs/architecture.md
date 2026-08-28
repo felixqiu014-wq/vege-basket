@@ -122,6 +122,11 @@ assignment checks. Todo public-link creation and revocation are one explicit exc
 managed organization administrators may share todos in projects attached to their organization
 without receiving general todo mutation access.
 
+System administrators identified by `VEGES_ADMIN_USERNAMES` may read organization-attached
+projects and todos and may update only a todo's due date, priority, module, assignee, watchers,
+or reviewer. This does not make the project writable and does not grant access to unscoped
+projects or other todo fields.
+
 The update log is a global authenticated read surface. Its create and update routes require
 `isSystemAdmin(username)`, which is derived from `VEGES_ADMIN_USERNAMES`; an
 `organization_admin` role does not grant global update-log write access.

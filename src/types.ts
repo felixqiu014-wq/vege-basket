@@ -488,6 +488,7 @@ export type Project = {
   ownerName: string
   ownerUserId: number
   organizationId?: number | null
+  canManageOrganizationTodos?: boolean
   readOnly?: boolean
   status: ProjectStatus
   feishuChatEnabled?: boolean

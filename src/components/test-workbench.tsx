@@ -5,12 +5,14 @@ import {
   ArrowsLeftRight,
   Bell,
   Bug,
+  Buildings,
   CaretDoubleLeft,
   CaretDoubleRight,
   CaretDown,
   CaretLeft,
   CaretRight,
   CheckCircle,
+  Check,
   ClipboardText,
   Clock,
   CopySimple,
@@ -52,6 +54,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -419,13 +424,29 @@ function WorkspaceError({ message }: { message: string }) {
   return message ? <div className="test-workbench-error"><WarningCircle /> {message}</div> : null
 }
 
-function TestSpaceSelectLabel({ name, versionLabel }: { name: string; versionLabel?: string }) {
+function TestSpaceSelectLabel({
+  name,
+  organizationName,
+  versionLabel,
+}: {
+  name: string
+  organizationName?: string
+  versionLabel?: string
+}) {
+  const metadata = [organizationName, versionLabel].filter(Boolean).join(' · ')
+
   return (
     <span className="test-space-select-label">
       <span>{name}</span>
-      {versionLabel ? <small>{versionLabel}</small> : null}
+      {metadata ? <small>{metadata}</small> : null}
     </span>
   )
+}
+
+type TestSpaceOrganizationGroup = {
+  id: string
+  name: string
+  spaces: TestSpaceSettings['spaces']
 }
 
 export function TestWorkbench({
@@ -646,6 +667,40 @@ export function TestWorkbench({
   }, [invitePasswordChecking, invitePasswordDraft, invitePasswordRequired, invitePasswordVerified, inviteToken])
 
   const activeSpace = data.spaces.find((space) => space.id === spaceId)
+  const activeManagedSpace = spaceSettings.spaces.find((space) => space.id === spaceId)
+  const testSpaceOrganizationGroups = useMemo<TestSpaceOrganizationGroup[]>(() => {
+    const visibleSpaceIds = new Set(data.spaces.map((space) => space.id))
+    const groups = new Map<string, TestSpaceOrganizationGroup>()
+
+    for (const organization of spaceSettings.organizations) {
+      groups.set(`organization:${organization.id}`, {
+        id: `organization:${organization.id}`,
+        name: organization.name,
+        spaces: [],
+      })
+    }
+
+    for (const space of spaceSettings.spaces) {
+      if (!visibleSpaceIds.has(space.id)) continue
+      const groupId = space.organizationId
+        ? `organization:${space.organizationId}`
+        : 'personal'
+      const group = groups.get(groupId) ?? {
+        id: groupId,
+        name: space.organizationName ?? '未归属组织',
+        spaces: [],
+      }
+      group.spaces.push(space)
+      groups.set(groupId, group)
+    }
+
+    return Array.from(groups.values())
+      .filter((group) => group.spaces.length > 0)
+      .map((group) => ({
+        ...group,
+        spaces: [...group.spaces].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN')),
+      }))
+  }, [data.spaces, spaceSettings.organizations, spaceSettings.spaces])
   const activeSpaceReadOnly = activeSpace?.accessLevel === 'viewer'
   const subjects = data.subjects.filter((subject) => subject.testSpaceId === spaceId)
   const activeSubject = subjects.find((subject) => subject.id === subjectId)
@@ -939,50 +994,67 @@ export function TestWorkbench({
           </button>
         </div>
         <div className="test-space-switcher">
-          <Select
+          <DropdownMenu
             open={spaceSwitcherOpen}
-            value={spaceId ? String(spaceId) : ''}
             onOpenChange={setSpaceSwitcherOpen}
-            onValueChange={(value) => setSpaceId(Number(value))}
           >
-            <SelectTrigger aria-label="测试空间"><SelectValue placeholder="选择测试空间" /></SelectTrigger>
-            <SelectContent
-              footer={(
-                <div className="test-space-manage-footer">
-                  <button
-                    type="button"
-                    className="test-space-manage-option"
-                    onClick={() => {
-                      setSpaceSwitcherOpen(false)
-                      setSpaceCreateOpen(true)
-                    }}
-                  >
-                    <Plus />
-                    <span>新建测试空间</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="test-space-manage-option"
-                    onClick={() => {
-                      setSpaceSwitcherOpen(false)
-                      setSpaceAdministrationOpen(true)
-                    }}
-                  >
-                    <GearSix />
-                    <span>管理测试空间</span>
-                  </button>
-                </div>
-              )}
-            >
-              {data.spaces.length > 0
-                ? data.spaces.map((space) => (
-                  <SelectItem key={space.id} value={String(space.id)}>
-                    <TestSpaceSelectLabel name={space.name} versionLabel={space.versionLabel} />
-                  </SelectItem>
-                ))
-                : <SelectItem disabled value="__empty">暂无测试空间</SelectItem>}
-            </SelectContent>
-          </Select>
+            <DropdownMenuTrigger asChild>
+              <Button className="test-space-cascade-trigger" type="button" variant="outline" aria-label="选择测试空间">
+                <TestSpaceSelectLabel
+                  name={activeSpace?.name ?? '选择测试空间'}
+                  organizationName={activeManagedSpace?.organizationName ?? (activeManagedSpace ? '未归属组织' : undefined)}
+                  versionLabel={activeManagedSpace?.versionLabel ?? activeSpace?.versionLabel}
+                />
+                <CaretDown aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="right" align="start" className="test-space-cascade-content">
+              {testSpaceOrganizationGroups.map((group) => (
+                <DropdownMenuSub key={group.id}>
+                  <DropdownMenuSubTrigger className="test-space-organization-item">
+                    <Buildings aria-hidden />
+                    <span>{group.name}</span>
+                    <small>{group.spaces.length}</small>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="test-space-cascade-space-content">
+                    {group.spaces.map((space) => (
+                      <DropdownMenuItem
+                        key={space.id}
+                        className="test-space-cascade-space-item"
+                        onSelect={() => setSpaceId(space.id)}
+                      >
+                        {space.id === spaceId ? <Check aria-hidden /> : <span className="test-space-select-check-placeholder" />}
+                        <TestSpaceSelectLabel
+                          name={space.name}
+                          organizationName={group.name}
+                          versionLabel={space.versionLabel}
+                        />
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ))}
+              {testSpaceOrganizationGroups.length > 0 ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuItem
+                onSelect={() => {
+                  setSpaceSwitcherOpen(false)
+                  setSpaceCreateOpen(true)
+                }}
+              >
+                <Plus aria-hidden />
+                新建测试空间
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  setSpaceSwitcherOpen(false)
+                  setSpaceAdministrationOpen(true)
+                }}
+              >
+                <GearSix aria-hidden />
+                管理测试空间
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
           <div className="test-workbench-nav-main">
             <nav className="test-workbench-nav-actions" aria-label="测试工作台模块">

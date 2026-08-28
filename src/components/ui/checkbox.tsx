@@ -15,7 +15,7 @@ function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxP
       {...props}
     >
       <CheckboxPrimitive.Indicator className="flex size-full items-center justify-center">
-        <Check weight="bold" className="size-3" />
+        <Check weight="bold" className="size-3 text-white" />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )

@@ -13,6 +13,16 @@ export type OrganizationAccessRole = (typeof organizationAccessRoles)[number]
 export const organizationProjectStatuses = ['active', 'paused', 'completed', 'archived'] as const
 export type OrganizationProjectStatus = (typeof organizationProjectStatuses)[number]
 
+export const organizationTodoEditableFields = [
+  'assigneeUserId',
+  'dueDate',
+  'moduleId',
+  'priority',
+  'reviewerUserId',
+  'watcherUserId',
+  'watcherUserIds',
+] as const
+
 export const organizationProjectHealthStatuses = ['on_track', 'at_risk', 'off_track'] as const
 export type OrganizationProjectHealthStatus = (typeof organizationProjectHealthStatuses)[number]
 
@@ -42,6 +52,12 @@ export function canManageOrganizationWeeklyReports(
   assignedRoles: readonly string[],
 ) {
   return canManageOrganization(role, assignedRoles)
+}
+
+export function isOrganizationTodoFieldUpdate(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const keys = Object.keys(value)
+  return keys.length > 0 && keys.every((key) => organizationTodoEditableFields.includes(key as typeof organizationTodoEditableFields[number]))
 }
 
 export function normalizeOrganizationProjectStatus(value: unknown) {

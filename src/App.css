@@ -486,6 +486,60 @@ textarea:focus {
   letter-spacing: -0.01em;
 }
 
+.sidebar-organization-switcher {
+  display: grid;
+  gap: 5px;
+  padding: 0 4px;
+}
+
+.sidebar-organization-select {
+  height: 40px;
+  min-width: 0;
+  border-color: var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--strong);
+  font-size: 13px;
+  font-weight: 580;
+}
+
+.sidebar-organization-select:hover,
+.sidebar-organization-select[data-state='open'] {
+  border-color: color-mix(in oklch, var(--brand) 48%, var(--line));
+  background: var(--surface);
+}
+
+.sidebar-organization-select-value {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-organization-select-value svg {
+  flex: 0 0 auto;
+  color: var(--brand);
+}
+
+.sidebar-organization-select-value [data-slot='select-value'] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-organization-content {
+  width: var(--radix-select-trigger-width);
+  border-color: var(--line);
+}
+
+.sidebar-organization-error {
+  margin: 0 4px;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .eyebrow {
   margin: 0;
   color: var(--muted-text);

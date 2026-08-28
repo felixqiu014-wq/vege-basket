@@ -169,6 +169,7 @@ import {
   getAuthenticatedRoleSession,
   getUserRoleContext,
   getSwitchableUserRoles,
+  isSystemAdmin,
   roleRouter,
   type UserRole,
 } from './roles.ts'
@@ -209,6 +210,7 @@ import {
   hashTodoShareToken,
   hashProjectTransferToken,
   isFreshFeishuTimestamp,
+  isOrganizationTodoFieldUpdate,
   verifyFeishuCardSignature,
 } from './organization-policy.ts'
 import {
@@ -4157,6 +4159,9 @@ async function getWorkspace(userId: number) {
     [userId],
   )
   const currentUserName = displayNameFromUser(currentUser.rows[0])
+  const systemAdmin = isSystemAdmin(currentUser.rows[0]?.email ?? '')
+  const systemAdminOrganizationScopeSql = (alias: string) =>
+    systemAdmin ? `${alias}.organization_id is not null` : 'false'
   const [
     projectsResult,
     projectModulesResult,
@@ -4176,6 +4181,7 @@ async function getWorkspace(userId: number) {
       owner_display_name: string
       access_role: ProjectAccessRole
       organization_admin_read_only: boolean
+      can_manage_organization_todos: boolean
       name: string
       description_encrypted: string | null
       status: ProjectStatus
@@ -4194,6 +4200,7 @@ async function getWorkspace(userId: number) {
              u.display_name as owner_display_name,
              case when p.user_id = $1 then 'owner' else 'member' end as access_role,
              (p.user_id <> $1 and pm.id is null) as organization_admin_read_only,
+             (p.organization_id is not null and ${systemAdminOrganizationScopeSql('p')}) as can_manage_organization_todos,
              p.name,
              p.description_encrypted,
              p.status,
@@ -4216,6 +4223,7 @@ async function getWorkspace(userId: number) {
       where p.user_id = $1
          or pm.id is not null
          or ${managedOrganizationReadScopeSql('p.organization_id')}
+         or ${systemAdminOrganizationScopeSql('p')}
       order by updated_at desc, id desc
       `,
       [userId],
@@ -4235,6 +4243,7 @@ async function getWorkspace(userId: number) {
       where p.user_id = $1
          or membership.id is not null
          or ${managedOrganizationReadScopeSql('p.organization_id')}
+         or ${systemAdminOrganizationScopeSql('p')}
       order by pm.created_at asc, pm.id asc
       `,
       [userId],
@@ -4269,12 +4278,14 @@ async function getWorkspace(userId: number) {
           p.user_id = $1
           or pm.id is not null
           or ${managedOrganizationReadScopeSql('p.organization_id')}
+          or ${systemAdminOrganizationScopeSql('p')}
         )
         and (
           je.author_user_id = $1
           or je.visibility = 'public'
           or (je.author_user_id is null and p.user_id = $1)
           or ${managedOrganizationReadScopeSql('p.organization_id')}
+          or ${systemAdminOrganizationScopeSql('p')}
         )
       order by je.created_at desc, je.id desc
       `,
@@ -4292,6 +4303,7 @@ async function getWorkspace(userId: number) {
       where p.user_id = $1
          or pm.id is not null
          or ${managedOrganizationReadScopeSql('p.organization_id')}
+         or ${systemAdminOrganizationScopeSql('p')}
       order by r.created_at desc, r.id desc
       `,
       [userId],
@@ -4413,6 +4425,7 @@ async function getWorkspace(userId: number) {
       where p.user_id = $1
          or membership.id is not null
          or ${managedOrganizationReadScopeSql('p.organization_id')}
+         or ${systemAdminOrganizationScopeSql('p')}
       order by t.created_at desc, t.id desc
       `,
       [userId],
@@ -4440,6 +4453,7 @@ async function getWorkspace(userId: number) {
       where p.user_id = $1
          or pm.id is not null
          or ${managedOrganizationReadScopeSql('p.organization_id')}
+         or ${systemAdminOrganizationScopeSql('p')}
       order by n.created_at asc, n.id asc
       `,
       [userId],
@@ -4496,6 +4510,7 @@ async function getWorkspace(userId: number) {
                and (
                  p.user_id = $1
                  or ${managedOrganizationReadScopeSql('p.organization_id')}
+                 or ${systemAdminOrganizationScopeSql('p')}
                )
            )
          )
@@ -4510,9 +4525,10 @@ async function getWorkspace(userId: number) {
                p.user_id as owner_user_id,
                p.user_id = $1 as is_owner,
                (
-                 p.user_id = $1
-                 or ${managedOrganizationReadScopeSql('p.organization_id')}
-               ) as can_view_all
+               p.user_id = $1
+               or ${managedOrganizationReadScopeSql('p.organization_id')}
+               or ${systemAdminOrganizationScopeSql('p')}
+             ) as can_view_all
         from projects p
         left join project_memberships access_pm
           on access_pm.project_id = p.id
@@ -4521,6 +4537,7 @@ async function getWorkspace(userId: number) {
         where p.user_id = $1
            or access_pm.id is not null
            or ${managedOrganizationReadScopeSql('p.organization_id')}
+           or ${systemAdminOrganizationScopeSql('p')}
       ),
       visible_memberships as (
         select pm.*
@@ -4659,6 +4676,7 @@ async function getWorkspace(userId: number) {
       accessRole: project.access_role,
       organizationId: project.organization_id ? Number(project.organization_id) : null,
       readOnly: project.organization_admin_read_only,
+      canManageOrganizationTodos: project.can_manage_organization_todos,
       name: decryptText(project.name),
       description: project.description_encrypted ? decryptText(project.description_encrypted) : '',
       ownerName: displayNameFromUser({
@@ -10565,6 +10583,8 @@ app.post('/api/todos', asyncHandler(async (request, response) => {
 app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
   const userId = await ensureUserId(request, response)
   if (!userId) return
+  const session = await getAuthenticatedRoleSession(request)
+  const systemAdmin = Boolean(session && session.userId === userId && isSystemAdmin(session.username))
   const todoId = Number(request.params.todoId)
   const existingTodo = await query<{
     assignee_user_id: string | null
@@ -10575,15 +10595,19 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
     done: boolean
     confirmation_status: TodoConfirmationStatus
     project_id: string
+    organization_id: string | null
+    owner_user_id: string
     title: string
     due_date: Date
     priority: Priority
   }>(
     `
-    select project_id, created_by_user_id, assignee_user_id, assigned_by_user_id,
+    select t.project_id, p.organization_id, p.user_id as owner_user_id,
+           t.created_by_user_id, t.assignee_user_id, t.assigned_by_user_id,
            watcher_user_id, reviewer_user_id, done, confirmation_status, title, due_date, priority
-    from todos
-    where id = $1
+    from todos t
+    join projects p on p.id = t.project_id
+    where t.id = $1
     `,
     [todoId],
   )
@@ -10592,7 +10616,15 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
     return
   }
   const projectId = Number(existingTodo.rows[0].project_id)
-  const access = await getProjectAccess(projectId, userId)
+  const systemAdminTodoAccess = systemAdmin && existingTodo.rows[0].organization_id != null
+  const directAccess = await getProjectAccess(projectId, userId)
+  const access = directAccess ?? (systemAdminTodoAccess
+    ? {
+      id: projectId,
+      ownerUserId: Number(existingTodo.rows[0].owner_user_id),
+      role: 'member' as const,
+    }
+    : null)
   if (!access) {
     response.status(404).json({ error: 'Todo not found' })
     return
@@ -10617,6 +10649,8 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
     ? Number(existingTodo.rows[0].reviewer_user_id)
     : null
   const canManageTodo = access.role === 'owner' || createdByUserId === userId
+  const canManageTodoFields = canManageTodo || systemAdminTodoAccess
+  const isSystemAdminTodoFieldUpdate = systemAdminTodoAccess && isOrganizationTodoFieldUpdate(request.body)
   const canReviewTodo = canUserReviewTodo({
     creatorUserId: createdByUserId,
     projectOwnerUserId: access.ownerUserId,
@@ -10692,7 +10726,7 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
     response.status(403).json({ error: 'Only the effective todo reviewer can complete this todo' })
     return
   }
-  if (!canManageTodo && !canUpdateTodoCompletion && !canRespondToAssignment) {
+  if (!canManageTodo && !isSystemAdminTodoFieldUpdate && !canUpdateTodoCompletion && !canRespondToAssignment) {
     response.status(403).json({ error: 'Only the owner or creator can update this todo' })
     return
   }
@@ -10710,10 +10744,10 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
       ? await ensureProjectMemberUserId(request.body.assigneeUserId, projectId, access.ownerUserId)
       : undefined
   const nextModuleId =
-    canManageTodo && 'moduleId' in request.body
+    canManageTodoFields && 'moduleId' in request.body
       ? await ensureProjectModuleId(request.body.moduleId, projectId)
       : undefined
-  const watcherFieldRequested = canManageTodo && (
+  const watcherFieldRequested = canManageTodoFields && (
     'watcherUserIds' in request.body || 'watcherUserId' in request.body
   )
   const nextWatcherInput = Array.isArray(request.body.watcherUserIds)
@@ -10730,12 +10764,12 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
   }
   const nextWatcherUserId = nextWatcherUserIds?.[0]
   const nextReviewerUserId =
-    canManageTodo && 'reviewerUserId' in request.body
+    canManageTodoFields && 'reviewerUserId' in request.body
       ? await ensureProjectMemberUserId(request.body.reviewerUserId, projectId, access.ownerUserId)
       : undefined
-  const watcherChanged = canManageTodo && hasTodoWatchersChanged(watcherUserIds, nextWatcherUserIds)
+  const watcherChanged = canManageTodoFields && hasTodoWatchersChanged(watcherUserIds, nextWatcherUserIds)
   if (
-    canManageTodo &&
+    canManageTodoFields &&
     request.body.reviewerUserId != null &&
     request.body.reviewerUserId !== '' &&
     nextReviewerUserId == null
@@ -10781,15 +10815,17 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
     await client.query('begin')
     const lockedTodoResult = await client.query<{
       assignee_user_id: string | null
+      organization_id: string | null
       reviewer_user_id: string | null
       confirmation_status: TodoConfirmationStatus
       done: boolean
     }>(
       `
-      select assignee_user_id, reviewer_user_id, confirmation_status, done
-      from todos
-      where id = $1
-        and project_id = $2
+      select t.assignee_user_id, p.organization_id, t.reviewer_user_id, t.confirmation_status, t.done
+      from todos t
+      join projects p on p.id = t.project_id
+      where t.id = $1
+        and t.project_id = $2
       for update
       `,
       [todoId, projectId],
@@ -10800,10 +10836,15 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
       response.status(404).json({ error: 'Todo not found' })
       return
     }
+    if (systemAdminTodoAccess && lockedTodo.organization_id == null) {
+      await client.query('rollback')
+      response.status(403).json({ error: 'System administrator todo access is no longer available' })
+      return
+    }
     const lockedAssigneeUserId = lockedTodo.assignee_user_id
       ? Number(lockedTodo.assignee_user_id)
       : null
-    assigneeChanged = canManageTodo && hasTodoAssigneeChanged(
+    assigneeChanged = canManageTodoFields && hasTodoAssigneeChanged(
       lockedAssigneeUserId,
       nextAssigneeUserId,
     )
@@ -10913,13 +10954,13 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
         nextTitle ? encryptText(nextTitle) : null,
         canManageTodo && typeof request.body.detail === 'string',
         nextDetail ? encryptText(nextDetail) : '',
-        canManageTodo && request.body.dueDate ? String(request.body.dueDate) : null,
-        canManageTodo && request.body.priority ? ensurePriority(request.body.priority) : null,
+        canManageTodoFields && request.body.dueDate ? String(request.body.dueDate) : null,
+        canManageTodoFields && request.body.priority ? ensurePriority(request.body.priority) : null,
         canRespondToAssignment || isAcceptanceDecisionUpdate ? requestedConfirmationStatus : null,
         assigneeChanged,
         nextAssigneeUserId,
         userId,
-        canManageTodo && 'moduleId' in request.body,
+        canManageTodoFields && 'moduleId' in request.body,
         nextModuleId,
         canManageTodo && 'createdAt' in request.body,
         nextCreatedAt,
@@ -10931,7 +10972,7 @@ app.patch('/api/todos/:todoId', asyncHandler(async (request, response) => {
         watcherChanged,
         nextWatcherUserId,
         watcherFieldRequested,
-        canManageTodo && 'reviewerUserId' in request.body,
+        canManageTodoFields && 'reviewerUserId' in request.body,
         nextReviewerUserId,
       ],
     )

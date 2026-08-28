@@ -213,7 +213,7 @@ test('detects only actual todo assignee changes', () => {
 test('todo detail edits compare the locked assignee before confirming assignment', () => {
   assert.match(
     serverSource,
-    /assigneeChanged = canManageTodo && hasTodoAssigneeChanged\(\s*lockedAssigneeUserId,\s*nextAssigneeUserId,\s*\)/,
+    /assigneeChanged = canManageTodoFields && hasTodoAssigneeChanged\(\s*lockedAssigneeUserId,\s*nextAssigneeUserId,\s*\)/,
   )
   assert.match(serverSource, /confirmation_status = case\s+when \$8::boolean then 'confirmed'/)
   assert.match(serverSource, /assigneeChanged,\s+nextAssigneeUserId,/)

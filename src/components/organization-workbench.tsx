@@ -295,10 +295,12 @@ function buildOrganizationInviteUrl(token: string) {
 
 export function OrganizationWorkbench({
   currentUser,
+  onOrganizationsChanged,
   onPackageMarketVisibilityChange,
   refreshToken = 0,
 }: {
   currentUser: AuthUser
+  onOrganizationsChanged?: () => void
   onPackageMarketVisibilityChange?: (organizationId: number, enabled: boolean) => void
   refreshToken?: number
 }) {
@@ -495,6 +497,7 @@ export function OrganizationWorkbench({
       setCreateOpen(false)
       await loadOrganizations(created.id)
       setDetail(created)
+      onOrganizationsChanged?.()
     } catch (createError) {
       setError(errorMessage(createError))
     } finally {
@@ -517,6 +520,7 @@ export function OrganizationWorkbench({
           ? { ...organization, name: nextDetail.name }
           : organization
       )))
+      onOrganizationsChanged?.()
       setSettingsOpen(false)
     } catch (renameError) {
       setOrganizationSettingsError(errorMessage(renameError))
@@ -581,6 +585,7 @@ export function OrganizationWorkbench({
       setDetail(null)
       setSelectedOrganizationId(0)
       await loadOrganizations()
+      onOrganizationsChanged?.()
     } catch (deleteError) {
       setOrganizationSettingsError(errorMessage(deleteError))
     } finally {
