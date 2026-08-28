@@ -1148,7 +1148,7 @@ export function PackageMarketBrowser({
                 [
                   { id: 'base' as const, label: '基础包', rules: groupedMarketRules.base },
                   { id: 'apps' as const, label: 'APPS', rules: groupedMarketRules.apps },
-                  { id: 'middleware' as const, label: 'SEALOS-PRO 中间件', rules: groupedMarketRules.middleware },
+                  { id: 'middleware' as const, label: '中间件', rules: groupedMarketRules.middleware },
                 ] satisfies Array<{
                   id: 'base' | 'apps' | 'middleware'
                   label: string
@@ -4302,7 +4302,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                 [
                   { id: 'base' as const, label: '基础包', rules: groupedMarketRules.base },
                   { id: 'apps' as const, label: 'APPS', rules: groupedMarketRules.apps },
-                  { id: 'middleware' as const, label: 'SEALOS-PRO 中间件', rules: groupedMarketRules.middleware },
+                  { id: 'middleware' as const, label: '中间件', rules: groupedMarketRules.middleware },
                 ] satisfies Array<{
                   id: 'base' | 'apps' | 'middleware'
                     label: string
