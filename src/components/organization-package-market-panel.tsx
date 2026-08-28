@@ -332,20 +332,31 @@ export function OrganizationPackageMarketPanel({
           </div>
 
           <div className="organization-package-market-mode-row">
-            <label htmlFor="organization-package-market-mode">显示模式</label>
-            <Select
-              value={channelPolicy?.mode ?? 'all'}
-              onValueChange={(value) => updateChannel({ mode: value as OrganizationPackageMarketSelectionMode })}
-              disabled={!canEdit || policySaving || !channelEnabled}
-            >
-              <SelectTrigger id="organization-package-market-mode" aria-label={`${channelLabels[activeChannel]}显示模式`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{selectionModeLabels.all}</SelectItem>
-                <SelectItem value="selected">{selectionModeLabels.selected}</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="organization-package-market-mode-copy">
+              <label htmlFor="organization-package-market-mode">成员可见范围</label>
+              <p id="organization-package-market-mode-help">
+                决定成员进入 {channelLabels[activeChannel]} 渠道后可以浏览哪些安装包。
+              </p>
+            </div>
+            <div className="organization-package-market-mode-control">
+              <Select
+                value={channelPolicy?.mode ?? 'all'}
+                onValueChange={(value) => updateChannel({ mode: value as OrganizationPackageMarketSelectionMode })}
+                disabled={!canEdit || policySaving || !channelEnabled}
+              >
+                <SelectTrigger
+                  id="organization-package-market-mode"
+                  aria-describedby="organization-package-market-mode-help"
+                  aria-label={`${channelLabels[activeChannel]}成员可见范围`}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{selectionModeLabels.all}</SelectItem>
+                  <SelectItem value="selected">{selectionModeLabels.selected}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {channelPolicy?.mode === 'selected' ? (
