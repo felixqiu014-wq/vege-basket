@@ -72,16 +72,28 @@ it does not prove database, OSS, Feishu, or AI workflows.
 Versioned incremental DDL is maintained in `server/migrations/`. Apply pending SQL
 files in filename order before deploying code that references a new table, column,
 constraint, or index. Each file is forward-only and transaction-wrapped; do not edit
-an already-applied file. The current package-market migration can be applied with:
+an already-applied file. The current package-market migration sequence can be applied with:
 
 ```bash
 psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
   --file=server/migrations/20260828_organization_package_market_policy.sql
+psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
+  --file=server/migrations/20260828_organization_package_market_policy_excluded_mode.sql
+psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
+  --file=server/migrations/20260828_organization_package_market_policy_shared_selection.sql
 ```
 
 Select the target `DATABASE_URL`, take the required backup, and obtain explicit
 authorization before running it. The command above is a database write. Keep
 `server/schema.ts` in sync as the idempotent bootstrap/compatibility definition.
+Do not roll an application image back to a version that predates the excluded-mode
+migration while any enabled channel uses `excluded`: older code treats that unknown mode as
+the permissive default. First use the current UI or API to change those policies to `all` or
+`selected`, or close the affected channel. The shared-selection migration is also forward-only:
+the current server mirrors a new shared range into legacy channel rows on every save, but the
+migration itself preserves legacy rows unchanged. Before rolling back to a per-channel-policy
+image, either resave the affected organization settings with the current version or restore the
+pre-release database snapshot.
 
 `npm run db:init` applies the current idempotent schema. `npm run db:encrypt-existing`
 applies the schema and encrypts supported legacy plaintext fields. Both are mutating

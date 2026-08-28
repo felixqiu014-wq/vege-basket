@@ -1,4 +1,4 @@
-import type { OrganizationPackageMarketChannel } from '../shared/organization-package-market'
+import type { OrganizationPackageMarketPolicy } from '../shared/organization-package-market'
 import type { OrganizationPackageMarketCatalogRule } from './organization-types'
 
 export const organizationPackageMarketPageSizes = [12, 24, 48] as const
@@ -7,16 +7,14 @@ export type OrganizationPackageMarketCategory = 'all' | OrganizationPackageMarke
 
 export function selectableOrganizationPackageMarketRules(
   rules: readonly OrganizationPackageMarketCatalogRule[],
-  channel: OrganizationPackageMarketChannel,
 ) {
-  return rules.filter((rule) => rule.selectable && (channel === 'release' || rule.ciSupported))
+  return rules.filter((rule) => rule.selectable)
 }
 
 export function filterOrganizationPackageMarketRules(
   rules: readonly OrganizationPackageMarketCatalogRule[],
   options: {
     category?: OrganizationPackageMarketCategory
-    channel: OrganizationPackageMarketChannel
     onlySelected?: boolean
     query?: string
     selectedIds?: readonly string[]
@@ -25,7 +23,7 @@ export function filterOrganizationPackageMarketRules(
   const query = options.query?.trim().toLocaleLowerCase() ?? ''
   const category = options.category ?? 'all'
   const selectedIds = new Set(options.selectedIds ?? [])
-  return selectableOrganizationPackageMarketRules(rules, options.channel).filter((rule) => {
+  return selectableOrganizationPackageMarketRules(rules).filter((rule) => {
     const matchesCategory = category === 'all' || rule.category === category
     const matchesQuery = !query || [rule.name, rule.id, rule.canonicalId]
       .some((value) => value.toLocaleLowerCase().includes(query))
@@ -64,28 +62,16 @@ export function toggleOrganizationPackageMarketRule(
 }
 
 export function organizationPackageMarketPoliciesEqual(
-  left: {
-    enabled: boolean
-    channels: Record<OrganizationPackageMarketChannel, {
-      enabled: boolean
-      mode: string
-      ruleIds: readonly string[]
-    }>
-  },
-  right: {
-    enabled: boolean
-    channels: Record<OrganizationPackageMarketChannel, {
-      enabled: boolean
-      mode: string
-      ruleIds: readonly string[]
-    }>
-  },
+  left: OrganizationPackageMarketPolicy,
+  right: OrganizationPackageMarketPolicy,
 ) {
   if (left.enabled !== right.enabled) return false
+  if (left.selection.mode !== right.selection.mode) return false
+  if (
+    [...left.selection.ruleIds].sort().join('\u0000') !==
+    [...right.selection.ruleIds].sort().join('\u0000')
+  ) return false
   return (['release', 'ci'] as const).every((channel) => (
-    left.channels[channel].enabled === right.channels[channel].enabled &&
-    left.channels[channel].mode === right.channels[channel].mode &&
-    [...left.channels[channel].ruleIds].sort().join('\u0000') ===
-      [...right.channels[channel].ruleIds].sort().join('\u0000')
+    left.channels[channel].enabled === right.channels[channel].enabled
   ))
 }

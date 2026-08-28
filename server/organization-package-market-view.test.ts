@@ -81,22 +81,20 @@ const rules: OrganizationPackageMarketCatalogRule[] = [
   },
 ]
 
-test('package market catalog filters by channel, category, query, and selection', () => {
+test('package market catalog filters one shared range by category, query, and selection', () => {
   assert.deepEqual(
-    filterOrganizationPackageMarketRules(rules, { channel: 'ci' }).map((rule) => rule.canonicalId),
-    ['terminal', 'registry'],
+    filterOrganizationPackageMarketRules(rules, {}).map((rule) => rule.canonicalId),
+    ['terminal', 'registry', 'base-oss'],
   )
   assert.deepEqual(
     filterOrganizationPackageMarketRules(rules, {
       category: 'middleware',
-      channel: 'release',
       query: 'REGISTRY',
     }).map((rule) => rule.canonicalId),
     ['registry'],
   )
   assert.deepEqual(
     filterOrganizationPackageMarketRules(rules, {
-      channel: 'release',
       onlySelected: true,
       selectedIds: ['terminal'],
     }).map((rule) => rule.canonicalId),
@@ -124,17 +122,11 @@ test('package market selection toggles one stable rule id at a time', () => {
 test('package market policy equality ignores selection ordering', () => {
   const left = {
     ...defaultOrganizationPackageMarketPolicy,
-    channels: {
-      ...defaultOrganizationPackageMarketPolicy.channels,
-      release: { enabled: true, mode: 'selected' as const, ruleIds: ['registry', 'terminal'] },
-    },
+    selection: { mode: 'selected' as const, ruleIds: ['registry', 'terminal'] },
   }
   const right = {
     ...left,
-    channels: {
-      ...left.channels,
-      release: { ...left.channels.release, ruleIds: ['terminal', 'registry'] },
-    },
+    selection: { ...left.selection, ruleIds: ['terminal', 'registry'] },
   }
   assert.equal(organizationPackageMarketPoliciesEqual(left, right), true)
 })

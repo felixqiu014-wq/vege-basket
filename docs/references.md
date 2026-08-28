@@ -215,12 +215,15 @@ must remain bound to the authorized project ID.
 - Package operation status: `pending`, `success`, `failed`.
 - Package market channel: `release`, `ci`.
 - Organization package-market policy: one feature switch plus independent `release` and `ci`
-  channel switches. Each channel uses `all` or `selected` mode; selected mode stores stable
-  rule IDs (including a single package), while dependency rules inherit their parent's
-  channel visibility. The OSS base package has no CI surface. Global market requests must
-  provide one organization context; project selectors resolve the project's organization
-  and personal projects use the default enabled/all policy. The `includeAll` control only
-  broadens object matching inside an allowed rule and never bypasses organization visibility.
+  channel switches. A single organization-wide `all`, `selected`, or `excluded` visibility
+  range controls the stable rule IDs for every enabled channel: selected IDs form an allow-list,
+  excluded IDs form a deny-list, and either list may contain one package. A save may not leave
+  any enabled channel without a usable package; close that channel to prohibit every package.
+  Dependency rules inherit their parent's channel visibility. The OSS base package has no CI
+  surface. Global market requests must provide one organization context; project selectors
+  resolve the project's organization and personal projects use the default enabled/all policy.
+  The `includeAll` control only broadens object matching inside an allowed rule and never
+  bypasses organization visibility.
 - Supported todo images and test-workbench evidence attachments: PNG, JPEG, WebP, GIF images; MP4, WebM, and QuickTime videos.
 - Account roles: `developer`, `tester`, `organization_admin`. `developer` and `tester`
   are switchable session personas. `organization_admin` is additive, is not shown in the

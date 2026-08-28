@@ -88,10 +88,10 @@ The production image builds `src/` into `dist/`, copies `server/`, and starts
 - `server/package-market.ts`: OSS configuration, package rules, object-key allowlisting,
   object access, and signed download URLs.
 - `server/organization-package-market.ts`, `shared/organization-package-market.ts`:
-  organization-scoped package-market feature/channel policy, selected rule catalog,
-  canonical base-package IDs, and authorization helpers shared by global and project
-  package selectors. Generic organization feature rows leave room for future display
-  settings without coupling those settings to the package rule format.
+  organization-scoped package-market feature/channel switches, one shared package
+  visibility range, canonical base-package IDs, and authorization helpers shared by
+  global and project package selectors. Generic organization feature rows leave room
+  for future display settings without coupling those settings to the package rule format.
 - `server/image-sync-workflows.ts`: fixed-repository GitHub workflow dispatch with a
   persisted `dispatch_key`, recovery of ambiguous dispatch responses by matching the
   workflow `run-name`, encrypted user-owned run records, bounded Run/Job/Step
@@ -266,8 +266,15 @@ The schema is normalized around these groups:
   expiring `organization_invite_links`, callback replay records, audit events, weekly reports,
   and weekly summaries. Organization
   package-market visibility is stored separately in `organization_feature_settings`,
-  `organization_package_market_channel_policies`, and
-  `organization_package_market_selections`; missing rows use the enabled/all defaults.
+  `organization_package_market_channel_policies`,
+  `organization_package_market_selection_policies`, and
+  `organization_package_market_selection_rules`; missing rows use the enabled/all
+  defaults. Release and CI each carry only an independent enabled switch. One
+  organization-wide `all`, `selected`, or `excluded` range applies to every enabled
+  channel, with rule rows acting as an allow-list in `selected` mode and a deny-list in
+  `excluded` mode. The older channel selection rows remain as compatibility mirrors;
+  dependency package visibility remains derived from its parent package in the
+  dependency's own channel.
   access does not replace general resource write permissions. Active organization owners and
   administrators with the `organization_admin` account role receive organization-scoped
   read access and may govern attached project status, health, and milestones without becoming

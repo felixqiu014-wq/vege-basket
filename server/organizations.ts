@@ -928,27 +928,46 @@ export function createOrganizationRouter(dependencies: OrganizationRouterDepende
         (
           coalesce(feature.enabled, true)
           and (
+            (coalesce(release_channel.enabled, true) or coalesce(ci_channel.enabled, true))
+          )
+          and (
             (
-              coalesce(release_channel.enabled, true)
+              selection_policy.organization_id is not null
               and (
-                coalesce(release_channel.mode, 'all') = 'all'
+                selection_policy.mode in ('all', 'excluded')
                 or exists (
                   select 1
-                  from organization_package_market_selections release_selection
-                  where release_selection.organization_id = o.id
-                    and release_selection.channel = 'release'
+                  from organization_package_market_selection_rules selection_rule
+                  where selection_rule.organization_id = o.id
                 )
               )
             )
             or (
-              coalesce(ci_channel.enabled, true)
+              selection_policy.organization_id is null
               and (
-                coalesce(ci_channel.mode, 'all') = 'all'
-                or exists (
-                  select 1
-                  from organization_package_market_selections ci_selection
-                  where ci_selection.organization_id = o.id
-                    and ci_selection.channel = 'ci'
+                (
+                  coalesce(release_channel.enabled, true)
+                  and (
+                    coalesce(release_channel.mode, 'all') in ('all', 'excluded')
+                    or exists (
+                      select 1
+                      from organization_package_market_selections release_selection
+                      where release_selection.organization_id = o.id
+                        and release_selection.channel = 'release'
+                    )
+                  )
+                )
+                or (
+                  coalesce(ci_channel.enabled, true)
+                  and (
+                    coalesce(ci_channel.mode, 'all') in ('all', 'excluded')
+                    or exists (
+                      select 1
+                      from organization_package_market_selections ci_selection
+                      where ci_selection.organization_id = o.id
+                        and ci_selection.channel = 'ci'
+                    )
+                  )
                 )
               )
             )
@@ -959,12 +978,15 @@ export function createOrganizationRouter(dependencies: OrganizationRouterDepende
       left join organization_memberships m on m.organization_id = o.id
       left join organization_feature_settings feature
         on feature.organization_id = o.id and feature.feature_key = 'package_market'
+      left join organization_package_market_selection_policies selection_policy
+        on selection_policy.organization_id = o.id
       left join organization_package_market_channel_policies release_channel
         on release_channel.organization_id = o.id and release_channel.channel = 'release'
       left join organization_package_market_channel_policies ci_channel
         on ci_channel.organization_id = o.id and ci_channel.channel = 'ci'
       where mine.user_id = $1 and mine.status = 'active'
       group by o.id, mine.access_role, feature.enabled,
+        selection_policy.organization_id, selection_policy.mode,
         release_channel.enabled, release_channel.mode,
         ci_channel.enabled, ci_channel.mode
       order by lower(o.name), o.id

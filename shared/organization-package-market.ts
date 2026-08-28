@@ -1,12 +1,15 @@
 export const organizationPackageMarketChannels = ['release', 'ci'] as const
 export type OrganizationPackageMarketChannel = (typeof organizationPackageMarketChannels)[number]
 
-export const organizationPackageMarketSelectionModes = ['all', 'selected'] as const
+export const organizationPackageMarketSelectionModes = ['all', 'selected', 'excluded'] as const
 export type OrganizationPackageMarketSelectionMode =
   (typeof organizationPackageMarketSelectionModes)[number]
 
 export type OrganizationPackageMarketChannelPolicy = {
   enabled: boolean
+}
+
+export type OrganizationPackageMarketSelectionPolicy = {
   mode: OrganizationPackageMarketSelectionMode
   ruleIds: string[]
 }
@@ -15,14 +18,18 @@ export type OrganizationPackageMarketPolicy = {
   enabled: boolean
   revision: number
   channels: Record<OrganizationPackageMarketChannel, OrganizationPackageMarketChannelPolicy>
+  selection: OrganizationPackageMarketSelectionPolicy
 }
 
 export type OrganizationPackageMarketPolicyPatch = {
   enabled?: boolean
   revision?: number
+  selection?: Partial<OrganizationPackageMarketSelectionPolicy>
   channels?: Partial<Record<
     OrganizationPackageMarketChannel,
-    Partial<OrganizationPackageMarketChannelPolicy>
+    // mode and ruleIds are retained here only so older serialized policies can
+    // be normalized safely while the canonical response uses `selection`.
+    Partial<OrganizationPackageMarketChannelPolicy & OrganizationPackageMarketSelectionPolicy>
   >>
 }
 
@@ -39,14 +46,14 @@ export const defaultOrganizationPackageMarketPolicy: OrganizationPackageMarketPo
   channels: {
     release: {
       enabled: true,
-      mode: 'all',
-      ruleIds: [],
     },
     ci: {
       enabled: true,
-      mode: 'all',
-      ruleIds: [],
     },
+  },
+  selection: {
+    mode: 'all',
+    ruleIds: [],
   },
 }
 
@@ -55,11 +62,15 @@ export function organizationPackageMarketPolicyHasVisibleChannel(
   visibleRuleIds?: Partial<Record<OrganizationPackageMarketChannel, readonly string[]>>,
 ) {
   if (!policy.enabled) return false
+  if (policy.selection.mode === 'selected' && policy.selection.ruleIds.length === 0) {
+    return false
+  }
   return organizationPackageMarketChannels.some((channel) => {
     const channelPolicy = policy.channels[channel]
     if (!channelPolicy.enabled) return false
-    if (channelPolicy.mode === 'all') return true
-    return (visibleRuleIds?.[channel] ?? channelPolicy.ruleIds).length > 0
+    const resolvedRuleIds = visibleRuleIds?.[channel]
+    if (resolvedRuleIds) return resolvedRuleIds.length > 0
+    return true
   })
 }
 
@@ -121,13 +132,17 @@ export function packageMarketRuleSupportsChannel(
 
 function topLevelRuleAllowed(
   ruleId: string,
+  selection: OrganizationPackageMarketSelectionPolicy,
   channelPolicy: OrganizationPackageMarketChannelPolicy,
   channel: OrganizationPackageMarketChannel,
 ) {
   const canonicalId = canonicalPackageMarketRuleId(ruleId)
   if (!channelPolicy.enabled || !packageMarketRuleSupportsChannel(canonicalId, channel)) return false
-  if (channelPolicy.mode === 'all') return true
-  return channelPolicy.ruleIds.some((ruleId) => canonicalPackageMarketRuleId(ruleId) === canonicalId)
+  if (selection.mode === 'all') return true
+  const listed = selection.ruleIds.some((ruleId) => (
+    canonicalPackageMarketRuleId(ruleId) === canonicalId
+  ))
+  return selection.mode === 'selected' ? listed : !listed
 }
 
 export function isPackageMarketRuleVisible(
@@ -140,9 +155,9 @@ export function isPackageMarketRuleVisible(
   if (rule.category === 'dependency') {
     if (packageMarketDependencyChannel(rule) !== channel) return false
     const parent = canonicalPackageMarketRuleId(rule.parent)
-    return Boolean(parent) && topLevelRuleAllowed(parent, channelPolicy, channel)
+    return Boolean(parent) && topLevelRuleAllowed(parent, policy.selection, channelPolicy, channel)
   }
-  return topLevelRuleAllowed(rule.id, channelPolicy, channel)
+  return topLevelRuleAllowed(rule.id, policy.selection, channelPolicy, channel)
 }
 
 export function filterPackageMarketRules<T extends PackageMarketRuleIdentity>(
@@ -184,8 +199,9 @@ export function mergeOrganizationPackageMarketPolicy(
   const source = value ?? {}
   const channels: Partial<Record<
     OrganizationPackageMarketChannel,
-    Partial<OrganizationPackageMarketChannelPolicy>
+    Partial<OrganizationPackageMarketChannelPolicy & OrganizationPackageMarketSelectionPolicy>
   >> = source.channels ?? {}
+  const legacySelection = channels.release ?? channels.ci
   return {
     enabled: source.enabled !== false,
     revision: Number.isSafeInteger(source.revision) && Number(source.revision) >= 0
@@ -195,17 +211,25 @@ export function mergeOrganizationPackageMarketPolicy(
       release: normalizeChannelPolicy(channels.release),
       ci: normalizeChannelPolicy(channels.ci),
     },
+    selection: normalizeSelectionPolicy(source.selection ?? legacySelection),
   }
 }
 
 function normalizeChannelPolicy(
-  value: Partial<OrganizationPackageMarketChannelPolicy> | null | undefined,
+  value: Partial<OrganizationPackageMarketChannelPolicy & OrganizationPackageMarketSelectionPolicy> | null | undefined,
 ): OrganizationPackageMarketChannelPolicy {
+  return {
+    enabled: value?.enabled !== false,
+  }
+}
+
+function normalizeSelectionPolicy(
+  value: Partial<OrganizationPackageMarketSelectionPolicy> | null | undefined,
+): OrganizationPackageMarketSelectionPolicy {
   const mode = normalizeOrganizationPackageMarketSelectionMode(value?.mode) ?? 'all'
   const ruleIds = normalizeOrganizationPackageMarketRuleIds(value?.ruleIds) ?? []
   return {
-    enabled: value?.enabled !== false,
     mode,
-    ruleIds,
+    ruleIds: mode === 'all' ? [] : ruleIds,
   }
 }

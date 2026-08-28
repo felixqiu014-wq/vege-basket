@@ -49,6 +49,7 @@ import type { UserAccountStatus } from '../shared/user-lifecycle'
 import type {
   OrganizationPackageMarketChannelPolicy,
   OrganizationPackageMarketPolicy,
+  OrganizationPackageMarketSelectionPolicy,
 } from '../shared/organization-package-market'
 import type {
   OrganizationAccessRole,
@@ -574,6 +575,7 @@ export function updateOrganizationPackageMarketPolicy(
     channels: Record<'release' | 'ci', OrganizationPackageMarketChannelPolicy>
     featureEnabled: boolean
     revision: number
+    selection: OrganizationPackageMarketSelectionPolicy
   },
 ) {
   return request<OrganizationDetail>(`/api/organizations/${organizationId}/package-market/policy`, {

@@ -133,8 +133,7 @@ alter table organizations
   add column if not exists weekly_report_close_day smallint not null default 1,
   add column if not exists weekly_report_close_time time not null default '23:59';
 
--- Keep this idempotent definition synchronized with
--- server/migrations/20260828_organization_package_market_policy.sql.
+-- Keep this idempotent definition synchronized with the versioned package-market migrations.
 create table if not exists organization_feature_settings (
   organization_id bigint not null references organizations(id) on delete cascade,
   feature_key text not null,
@@ -150,11 +149,37 @@ create table if not exists organization_package_market_channel_policies (
   organization_id bigint not null references organizations(id) on delete cascade,
   channel text not null check (channel in ('release', 'ci')),
   enabled boolean not null default true,
-  mode text not null default 'all' check (mode in ('all', 'selected')),
+  mode text not null default 'all' check (mode in ('all', 'selected', 'excluded')),
   updated_by_user_id bigint references users(id) on delete set null,
   updated_at timestamptz not null default now(),
   primary key (organization_id, channel)
 );
+
+-- Existing databases created before the excluded mode need their named check
+-- constraint replaced; CREATE TABLE IF NOT EXISTS does not evolve it.
+do $$
+declare
+  existing_mode_constraint text;
+begin
+  select pg_get_constraintdef(constraint_row.oid)
+    into existing_mode_constraint
+  from pg_constraint constraint_row
+  where constraint_row.conrelid = 'organization_package_market_channel_policies'::regclass
+    and constraint_row.conname = 'organization_package_market_channel_policies_mode_check';
+
+  if existing_mode_constraint is null then
+    alter table organization_package_market_channel_policies
+      add constraint organization_package_market_channel_policies_mode_check
+      check (mode in ('all', 'selected', 'excluded'));
+  elsif position('excluded' in existing_mode_constraint) = 0 then
+    alter table organization_package_market_channel_policies
+      drop constraint organization_package_market_channel_policies_mode_check;
+    alter table organization_package_market_channel_policies
+      add constraint organization_package_market_channel_policies_mode_check
+      check (mode in ('all', 'selected', 'excluded'));
+  end if;
+end
+$$;
 
 create table if not exists organization_package_market_selections (
   organization_id bigint not null references organizations(id) on delete cascade,
@@ -162,6 +187,24 @@ create table if not exists organization_package_market_selections (
   rule_id text not null,
   created_at timestamptz not null default now(),
   primary key (organization_id, channel, rule_id)
+);
+
+-- The organization now owns one visibility range shared by every enabled
+-- channel. Channel rows retain only their on/off state in the current model;
+-- their legacy mode/selection fields are mirrored for a controlled rollback.
+create table if not exists organization_package_market_selection_policies (
+  organization_id bigint not null references organizations(id) on delete cascade,
+  mode text not null default 'all' check (mode in ('all', 'selected', 'excluded')),
+  updated_by_user_id bigint references users(id) on delete set null,
+  updated_at timestamptz not null default now(),
+  primary key (organization_id)
+);
+
+create table if not exists organization_package_market_selection_rules (
+  organization_id bigint not null references organizations(id) on delete cascade,
+  rule_id text not null,
+  created_at timestamptz not null default now(),
+  primary key (organization_id, rule_id)
 );
 
 do $$
@@ -2002,6 +2045,8 @@ create index if not exists idx_organization_audit_events_lookup
   on organization_audit_events(organization_id, created_at desc);
 create index if not exists idx_organization_package_market_selections_lookup
   on organization_package_market_selections(organization_id, channel, rule_id);
+create index if not exists idx_organization_package_market_selection_rules_lookup
+  on organization_package_market_selection_rules(organization_id, rule_id);
 create index if not exists idx_project_memberships_project_id on project_memberships(project_id);
 create index if not exists idx_project_memberships_owner_user_id on project_memberships(owner_user_id);
 create index if not exists idx_project_memberships_invited_user_id on project_memberships(invited_user_id);

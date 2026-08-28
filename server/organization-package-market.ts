@@ -16,6 +16,7 @@ import {
   type OrganizationPackageMarketChannel,
   type OrganizationPackageMarketChannelPolicy,
   type OrganizationPackageMarketPolicy,
+  type OrganizationPackageMarketSelectionPolicy,
 } from '../shared/organization-package-market.ts'
 import {
   listPackageMarketRules,
@@ -34,8 +35,11 @@ type PolicyRow = {
   revision: number
   channel: string
   channel_enabled: boolean
-  channel_mode: string
-  rule_ids: string[]
+  legacy_channel_mode: string
+  legacy_rule_ids: string[]
+  selection_configured: boolean
+  selection_mode: string
+  selection_rule_ids: string[]
 }
 
 export type PackageMarketRulesResponse = {
@@ -82,7 +86,7 @@ export async function getOrganizationPackageMarketPolicy(
   client?: PoolClient,
 ): Promise<OrganizationPackageMarketPolicy> {
   const db = executor(client)
-  // Keep the feature flag, channel switches, and selections on one database
+  // Keep the feature flag, channel switches, and shared selection on one
   // snapshot so a concurrent policy save cannot produce a mixed response.
   const result = await db.query<PolicyRow>(
     `with channels(channel) as (
@@ -92,12 +96,19 @@ export async function getOrganizationPackageMarketPolicy(
             coalesce(feature.revision, 0) as revision,
             channels.channel,
             coalesce(channel_policy.enabled, true) as channel_enabled,
-            coalesce(channel_policy.mode, 'all') as channel_mode,
+            coalesce(channel_policy.mode, 'all') as legacy_channel_mode,
+            selection_policy.organization_id is not null as selection_configured,
+            coalesce(selection_policy.mode, 'all') as selection_mode,
             coalesce(
-              array_agg(selection.rule_id order by selection.rule_id)
-                filter (where selection.rule_id is not null),
+              array_agg(distinct selection_rule.rule_id order by selection_rule.rule_id)
+                filter (where selection_rule.rule_id is not null),
               '{}'::text[]
-            ) as rule_ids
+            ) as selection_rule_ids,
+            coalesce(
+              array_agg(distinct legacy_selection.rule_id order by legacy_selection.rule_id)
+                filter (where legacy_selection.rule_id is not null),
+              '{}'::text[]
+            ) as legacy_rule_ids
      from channels
      left join organization_feature_settings feature
        on feature.organization_id = $1::bigint
@@ -105,27 +116,47 @@ export async function getOrganizationPackageMarketPolicy(
      left join organization_package_market_channel_policies channel_policy
        on channel_policy.organization_id = $1::bigint
       and channel_policy.channel = channels.channel
-     left join organization_package_market_selections selection
-       on selection.organization_id = $1::bigint
-      and selection.channel = channels.channel
+     left join organization_package_market_selection_policies selection_policy
+       on selection_policy.organization_id = $1::bigint
+     left join organization_package_market_selection_rules selection_rule
+       on selection_rule.organization_id = $1::bigint
+     left join organization_package_market_selections legacy_selection
+       on legacy_selection.organization_id = $1::bigint
+      and legacy_selection.channel = channels.channel
      group by feature.enabled,
               feature.revision,
               channels.channel,
               channel_policy.enabled,
-              channel_policy.mode
+              channel_policy.mode,
+              selection_policy.organization_id,
+              selection_policy.mode
      order by channels.channel`,
     [organizationId],
   )
 
   const channels: Partial<Record<OrganizationPackageMarketChannel, Partial<OrganizationPackageMarketChannelPolicy>>> = {}
+  const legacySelections: Partial<Record<
+    OrganizationPackageMarketChannel,
+    OrganizationPackageMarketSelectionPolicy
+  >> = {}
+  let selection: OrganizationPackageMarketSelectionPolicy | undefined
   for (const row of result.rows) {
     const channel = normalizeOrganizationPackageMarketChannel(row.channel)
     if (!channel) continue
     channels[channel] = {
       enabled: row.channel_enabled === true,
-      mode: normalizeOrganizationPackageMarketSelectionMode(row.channel_mode) ?? 'all',
-      ruleIds: (Array.isArray(row.rule_ids) ? row.rule_ids : [])
+    }
+    legacySelections[channel] = {
+      mode: normalizeOrganizationPackageMarketSelectionMode(row.legacy_channel_mode) ?? 'all',
+      ruleIds: (Array.isArray(row.legacy_rule_ids) ? row.legacy_rule_ids : [])
         .map((ruleId) => canonicalPackageMarketRuleId(ruleId)),
+    }
+    if (row.selection_configured) {
+      selection = {
+        mode: normalizeOrganizationPackageMarketSelectionMode(row.selection_mode) ?? 'all',
+        ruleIds: (Array.isArray(row.selection_rule_ids) ? row.selection_rule_ids : [])
+          .map((ruleId) => canonicalPackageMarketRuleId(ruleId)),
+      }
     }
   }
 
@@ -133,7 +164,44 @@ export async function getOrganizationPackageMarketPolicy(
     enabled: result.rows[0]?.enabled !== false,
     revision: result.rows[0]?.revision ?? 0,
     channels,
+    // A server bootstrapped against a pre-migration database can create the
+    // new tables before the operator applies the migration. Derive a safe
+    // intersection from legacy rows until the canonical policy row exists.
+    selection: selection ?? mergeLegacyChannelSelections(legacySelections),
   })
+}
+
+function mergeLegacyChannelSelections(
+  legacySelections: Partial<Record<
+    OrganizationPackageMarketChannel,
+    OrganizationPackageMarketSelectionPolicy
+  >>,
+): OrganizationPackageMarketSelectionPolicy {
+  const release = legacySelections.release ?? { mode: 'all' as const, ruleIds: [] }
+  const ci = legacySelections.ci ?? { mode: 'all' as const, ruleIds: [] }
+  const policies = [release, ci]
+  const selectedPolicies = policies.filter((policy) => policy.mode === 'selected')
+
+  if (selectedPolicies.length > 0) {
+    let ruleIds = [...selectedPolicies[0].ruleIds]
+    for (const selected of selectedPolicies.slice(1)) {
+      const selectedIds = new Set(selected.ruleIds)
+      ruleIds = ruleIds.filter((ruleId) => selectedIds.has(ruleId))
+    }
+    const excludedIds = new Set(
+      policies
+        .filter((policy) => policy.mode === 'excluded')
+        .flatMap((policy) => policy.ruleIds),
+    )
+    return { mode: 'selected', ruleIds: ruleIds.filter((ruleId) => !excludedIds.has(ruleId)) }
+  }
+
+  const excludedRuleIds = policies
+    .filter((policy) => policy.mode === 'excluded')
+    .flatMap((policy) => policy.ruleIds)
+  return excludedRuleIds.length > 0
+    ? { mode: 'excluded', ruleIds: [...new Set(excludedRuleIds)] }
+    : { mode: 'all', ruleIds: [] }
 }
 
 export function normalizePackageMarketPolicyInput(value: unknown) {
@@ -144,29 +212,34 @@ export function normalizePackageMarketPolicyInput(value: unknown) {
   if (!channelsValue || typeof channelsValue !== 'object') return null
   const channels = channelsValue as Record<string, unknown>
   const normalizedChannels: Record<OrganizationPackageMarketChannel, OrganizationPackageMarketChannelPolicy> = {
-    release: { enabled: false, mode: 'all', ruleIds: [] },
-    ci: { enabled: false, mode: 'all', ruleIds: [] },
+    release: { enabled: false },
+    ci: { enabled: false },
   }
   for (const channel of ['release', 'ci'] as const) {
     const raw = channels[channel]
     if (!raw || typeof raw !== 'object') return null
     const record = raw as Record<string, unknown>
     if (typeof record.enabled !== 'boolean') return null
-    const mode = normalizeOrganizationPackageMarketSelectionMode(record.mode)
-    const ruleIds = normalizeOrganizationPackageMarketRuleIds(record.ruleIds)
-    if (!mode || !ruleIds) return null
     normalizedChannels[channel] = {
       enabled: record.enabled,
-      mode,
-      ruleIds,
     }
   }
+  const selectionValue = body.selection
+  if (!selectionValue || typeof selectionValue !== 'object') return null
+  const selectionRecord = selectionValue as Record<string, unknown>
+  const mode = normalizeOrganizationPackageMarketSelectionMode(selectionRecord.mode)
+  const ruleIds = normalizeOrganizationPackageMarketRuleIds(selectionRecord.ruleIds)
+  if (!mode || !ruleIds) return null
   const revision = Number(body.revision)
   if (!Number.isSafeInteger(revision) || revision < 0) return null
   return {
     featureEnabled: body.featureEnabled,
     revision,
     channels: normalizedChannels,
+    selection: {
+      mode,
+      ruleIds: mode === 'all' ? [] : ruleIds,
+    },
   }
 }
 
@@ -186,18 +259,33 @@ export function validatePackageMarketPolicyInput(
     if (!rule.category || rule.category === 'dependency') continue
     selectableRules.set(canonicalPackageMarketRuleId(rule.id), rule)
   }
-  for (const channel of ['release', 'ci'] as const) {
-    const channelPolicy = input.channels[channel]
-    for (const ruleId of channelPolicy.ruleIds) {
-      const canonicalId = canonicalPackageMarketRuleId(ruleId)
-      const rule = selectableRules.get(canonicalId)
-      if (!rule || !packageMarketRuleSupportsChannel(canonicalId, channel)) {
-        throw new OrganizationPackageMarketPolicyError(
-          'PACKAGE_MARKET_POLICY_INVALID',
-          `安装包 ${canonicalId} 不存在或不支持${channel === 'ci' ? '测试包' : '正式包'}渠道`,
-          400,
-        )
+  for (const ruleId of input.selection.ruleIds) {
+    const canonicalId = canonicalPackageMarketRuleId(ruleId)
+    if (!selectableRules.has(canonicalId)) {
+      throw new OrganizationPackageMarketPolicyError(
+        'PACKAGE_MARKET_POLICY_INVALID',
+        `安装包 ${canonicalId} 不存在或不能单独配置`,
+        400,
+      )
+    }
+  }
+  const enabledChannels = (['release', 'ci'] as const).filter((channel) => input.channels[channel].enabled)
+  if (input.featureEnabled && enabledChannels.length > 0) {
+    const listedRuleIds = new Set(input.selection.ruleIds.map(canonicalPackageMarketRuleId))
+    const hasVisibleRule = [...selectableRules.keys()].some((ruleId) => {
+      if (!enabledChannels.some((channel) => packageMarketRuleSupportsChannel(ruleId, channel))) {
+        return false
       }
+      if (input.selection.mode === 'all') return true
+      const listed = listedRuleIds.has(ruleId)
+      return input.selection.mode === 'selected' ? listed : !listed
+    })
+    if (!hasVisibleRule) {
+      throw new OrganizationPackageMarketPolicyError(
+        'PACKAGE_MARKET_POLICY_INVALID',
+        '当前已开启的渠道没有可用安装包，请调整可见范围或关闭对应渠道',
+        400,
+      )
     }
   }
   return input
@@ -223,6 +311,34 @@ export async function saveOrganizationPackageMarketPolicy(params: {
            updated_at = now()`,
     [params.organizationId, params.input.featureEnabled, revision, params.updatedByUserId],
   )
+  await params.client.query(
+    `insert into organization_package_market_selection_policies
+      (organization_id, mode, updated_by_user_id, updated_at)
+     values ($1, $2, $3, now())
+     on conflict (organization_id) do update
+       set mode = excluded.mode,
+           updated_by_user_id = excluded.updated_by_user_id,
+           updated_at = now()`,
+    [
+      params.organizationId,
+      params.input.selection.mode,
+      params.updatedByUserId,
+    ],
+  )
+  await params.client.query(
+    `delete from organization_package_market_selection_rules
+     where organization_id = $1`,
+    [params.organizationId],
+  )
+  for (const ruleId of params.input.selection.ruleIds) {
+    await params.client.query(
+      `insert into organization_package_market_selection_rules
+        (organization_id, rule_id)
+       values ($1, $2)
+       on conflict (organization_id, rule_id) do nothing`,
+      [params.organizationId, canonicalPackageMarketRuleId(ruleId)],
+    )
+  }
   for (const channel of ['release', 'ci'] as const) {
     const channelPolicy = params.input.channels[channel]
     await params.client.query(
@@ -234,20 +350,28 @@ export async function saveOrganizationPackageMarketPolicy(params: {
              mode = excluded.mode,
              updated_by_user_id = excluded.updated_by_user_id,
              updated_at = now()`,
-      [params.organizationId, channel, channelPolicy.enabled, channelPolicy.mode, params.updatedByUserId],
+      [
+        params.organizationId,
+        channel,
+        channelPolicy.enabled,
+        params.input.selection.mode,
+        params.updatedByUserId,
+      ],
     )
     await params.client.query(
       `delete from organization_package_market_selections
        where organization_id = $1 and channel = $2`,
       [params.organizationId, channel],
     )
-    for (const ruleId of channelPolicy.ruleIds) {
+    for (const ruleId of params.input.selection.ruleIds) {
+      const canonicalId = canonicalPackageMarketRuleId(ruleId)
+      if (!packageMarketRuleSupportsChannel(canonicalId, channel)) continue
       await params.client.query(
         `insert into organization_package_market_selections
           (organization_id, channel, rule_id)
          values ($1, $2, $3)
          on conflict (organization_id, channel, rule_id) do nothing`,
-        [params.organizationId, channel, canonicalPackageMarketRuleId(ruleId)],
+        [params.organizationId, channel, canonicalId],
       )
     }
   }
