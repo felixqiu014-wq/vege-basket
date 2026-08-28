@@ -1804,8 +1804,6 @@ function App() {
   const [notifications, setNotifications] = useState(emptyNotifications)
   const [openTodoCount, setOpenTodoCount] = useState(0)
   const [assignedBugCount, setAssignedBugCount] = useState(0)
-  const [packageMarketOrganizations, setPackageMarketOrganizations] = useState<OrganizationListItem[]>([])
-  const [packageMarketOrganizationsLoaded, setPackageMarketOrganizationsLoaded] = useState(false)
   const [assignedBugCommentReadAtByBugId, setAssignedBugCommentReadAtByBugId] = useState<Record<number, string>>(() =>
     loadAssignedBugCommentReadAt(authUser?.id),
   )
@@ -2270,7 +2268,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [authUserId, loggedIn, organizationRefreshVersion])
+  }, [authUserId, loggedIn, organizationRefreshVersion, workspaceRefreshVersion])
 
   useEffect(() => {
     if (!loggedIn || !authUser) return
@@ -2473,38 +2471,18 @@ function App() {
     })
   }, [loggedIn, refreshWorkspace])
 
-  useEffect(() => {
-    if (!loggedIn || !workspaceLoaded) {
-      setPackageMarketOrganizations([])
-      setPackageMarketOrganizationsLoaded(false)
-      return
-    }
-    let cancelled = false
-    fetchOrganizations()
-      .then(({ organizations }) => {
-        if (cancelled) return
-        setPackageMarketOrganizations(organizations)
-        setPackageMarketOrganizationsLoaded(true)
-      })
-      .catch(() => {
-        if (cancelled) return
-        // Keep the last confirmed availability during a transient refresh failure.
-        setPackageMarketOrganizationsLoaded(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [loggedIn, organizationRefreshVersion, workspaceLoaded, workspaceRefreshVersion])
-
-  const packageMarketVisible = packageMarketOrganizationsLoaded && packageMarketOrganizations.some(
-    (organization) => organization.packageMarketEnabled,
-  )
+  const activePackageMarketOrganization = selectedOrganizationId == null
+    ? null
+    : organizations.find(
+      (organization) => organization.id === selectedOrganizationId && organization.packageMarketEnabled,
+    ) ?? null
+  const packageMarketVisible = activePackageMarketOrganization !== null
 
   useEffect(() => {
-    if (view === 'package_market' && packageMarketOrganizationsLoaded && !packageMarketVisible) {
+    if (view === 'package_market' && !packageMarketVisible) {
       setView('search')
     }
-  }, [packageMarketOrganizationsLoaded, packageMarketVisible, view])
+  }, [packageMarketVisible, view])
 
   useEffect(() => {
     if (!loggedIn || !workspaceLoaded) return
@@ -3832,13 +3810,6 @@ function App() {
       setWorkspaceError('安装升级时间线导出失败，请稍后再试。')
       throw new Error('安装升级时间线导出失败')
     }
-  }
-
-  async function loadPackageMarketOrganizations() {
-    const result = await fetchOrganizations()
-    setPackageMarketOrganizations(result.organizations)
-    setPackageMarketOrganizationsLoaded(true)
-    return result.organizations
   }
 
   async function loadPackageMarketRules(
@@ -5363,11 +5334,6 @@ ${packageTimelineText}`
             currentUser={authUser}
             onOrganizationsChanged={() => setOrganizationRefreshVersion((current) => current + 1)}
             onPackageMarketVisibilityChange={(organizationId, enabled) => {
-              setPackageMarketOrganizations((current) => current.map((organization) => (
-                organization.id === organizationId
-                  ? { ...organization, packageMarketEnabled: enabled }
-                  : organization
-              )))
               setOrganizations((current) => current.map((organization) => (
                 organization.id === organizationId
                   ? { ...organization, packageMarketEnabled: enabled }
@@ -5405,9 +5371,9 @@ ${packageTimelineText}`
           />
         ) : null}
 
-        {view === 'package_market' ? (
+        {view === 'package_market' && activePackageMarketOrganization ? (
           <PackageMarketBrowser
-            onLoadPackageMarketOrganizations={loadPackageMarketOrganizations}
+            organizationId={activePackageMarketOrganization.id}
             onLoadPackageMarketCiBranches={loadPackageMarketCiBranches}
             onLoadPackageMarketDetail={loadPackageMarketDetail}
             onLoadPackageMarketRules={loadPackageMarketRules}

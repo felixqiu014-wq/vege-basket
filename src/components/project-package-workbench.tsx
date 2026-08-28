@@ -104,7 +104,6 @@ import type {
   PackageMarketRequestContext,
   PackageMarketRulesResponse,
 } from '@/api'
-import type { OrganizationListItem } from '@/organization-types'
 import {
   canonicalPackageMarketRuleId,
   isPackageMarketRuleVisible,
@@ -265,7 +264,7 @@ type PackageMarketDependencyState = {
 }
 
 type PackageMarketBrowserProps = {
-  onLoadPackageMarketOrganizations: () => Promise<OrganizationListItem[]>
+  organizationId: number
   onLoadPackageMarketCiBranches: PackageWorkbenchProps['onLoadPackageMarketCiBranches']
   onLoadPackageMarketDetail: PackageWorkbenchProps['onLoadPackageMarketDetail']
   onLoadPackageMarketRules: PackageWorkbenchProps['onLoadPackageMarketRules']
@@ -646,15 +645,13 @@ function PackageMarketRuleList({ children }: { children: ReactNode }) {
 }
 
 export function PackageMarketBrowser({
-  onLoadPackageMarketOrganizations,
+  organizationId,
   onLoadPackageMarketCiBranches,
   onLoadPackageMarketDetail,
   onLoadPackageMarketRules,
   onLoadPackageMarketVersions,
 }: PackageMarketBrowserProps) {
-  const [marketOrganizations, setMarketOrganizations] = useState<OrganizationListItem[]>([])
-  const [marketOrganizationId, setMarketOrganizationId] = useState<number | null>(null)
-  const [marketOrganizationLoading, setMarketOrganizationLoading] = useState(true)
+  const [marketContextLoading, setMarketContextLoading] = useState(true)
   const [marketPolicy, setMarketPolicy] = useState<PackageMarketRulesResponse['policy'] | null>(null)
   const [marketVisibleRuleIds, setMarketVisibleRuleIds] = useState<PackageMarketRulesResponse['visibleRuleIds']>({
     release: [],
@@ -685,12 +682,14 @@ export function PackageMarketBrowser({
     middleware: true,
   })
   const marketDetailRequestIdRef = useRef(0)
-  const loadMarketOrganizationsRef = useRef(onLoadPackageMarketOrganizations)
+  const currentOrganizationIdRef = useRef(organizationId)
   const loadMarketRulesRef = useRef(onLoadPackageMarketRules)
   useEffect(() => {
-    loadMarketOrganizationsRef.current = onLoadPackageMarketOrganizations
+    currentOrganizationIdRef.current = organizationId
+  }, [organizationId])
+  useEffect(() => {
     loadMarketRulesRef.current = onLoadPackageMarketRules
-  }, [onLoadPackageMarketOrganizations, onLoadPackageMarketRules])
+  }, [onLoadPackageMarketRules])
   const refreshMarketDetailRef = useRef<(
     nextOverrides?: Partial<{
       arch: 'amd64' | 'arm64'
@@ -701,7 +700,6 @@ export function PackageMarketBrowser({
       includeAll: boolean
       marketRules: PackageMarketRule[]
       visibleRuleIds: PackageMarketRulesResponse['visibleRuleIds']
-      organizationId: number
       packageId: string
       releaseVersion: string
       dependencyVersions: Record<string, string>
@@ -863,7 +861,6 @@ export function PackageMarketBrowser({
     includeAll: boolean
     marketRules: PackageMarketRule[]
     visibleRuleIds?: PackageMarketRulesResponse['visibleRuleIds']
-    organizationId: number
     packageId: string
     releaseVersion: string
     dependencyVersions: Record<string, string>
@@ -878,10 +875,7 @@ export function PackageMarketBrowser({
     const includeAll = nextOverrides?.includeAll ?? marketIncludeAll
     const rules = nextOverrides?.marketRules ?? marketRules
     const visibleRuleIds = nextOverrides?.visibleRuleIds ?? marketVisibleRuleIds
-    const requestOrganizationId = nextOverrides?.organizationId ?? marketOrganizationId
-    const requestContext: PackageMarketRequestContext | undefined = requestOrganizationId == null
-      ? undefined
-      : { organizationId: requestOrganizationId }
+    const requestContext: PackageMarketRequestContext = { organizationId }
     const requestId = ++marketDetailRequestIdRef.current
     setMarketLoading(true)
     setMarketError('')
@@ -1041,8 +1035,8 @@ export function PackageMarketBrowser({
     )
   }
 
-  async function loadMarketOrganization(organizationId: number, requestId: number) {
-    setMarketOrganizationLoading(true)
+  async function loadMarketContext(contextOrganizationId: number, requestId: number) {
+    setMarketContextLoading(true)
     setMarketPolicy(null)
     setMarketRules([])
     setMarketVisibleRuleIds({ release: [], ci: [] })
@@ -1052,10 +1046,12 @@ export function PackageMarketBrowser({
     setMarketReleaseVersions([])
     setMarketCiBranches([])
     setMarketCiVersions([])
-    const rulesPayload = await loadMarketRulesRef.current({ organizationId })
-    if (requestId !== marketDetailRequestIdRef.current) return
-    setMarketOrganizationId(organizationId)
-    setMarketOrganizationLoading(false)
+    const rulesPayload = await loadMarketRulesRef.current({ organizationId: contextOrganizationId })
+    if (
+      contextOrganizationId !== currentOrganizationIdRef.current ||
+      requestId !== marketDetailRequestIdRef.current
+    ) return
+    setMarketContextLoading(false)
     setMarketPolicy(rulesPayload.policy)
     setMarketVisibleRuleIds(rulesPayload.visibleRuleIds)
     setMarketRules(rulesPayload.rules)
@@ -1088,7 +1084,6 @@ export function PackageMarketBrowser({
       expireMinutes,
       marketRules: rulesPayload.rules,
       visibleRuleIds: rulesPayload.visibleRuleIds,
-      organizationId,
       packageId: nextPackage,
       releaseVersion: '',
       ciBranch: '',
@@ -1102,106 +1097,28 @@ export function PackageMarketBrowser({
     setMarketDetailContext(null)
     setMarketLoading(true)
     setMarketError('')
+    setMarketContextLoading(true)
     let cancelled = false
-    void loadMarketOrganizationsRef.current()
-      .then((organizations) => {
-        if (cancelled || requestId !== marketDetailRequestIdRef.current) return null
-        setMarketOrganizations(organizations)
-        setMarketOrganizationLoading(false)
-        const firstAvailable = organizations.find((organization) => organization.packageMarketEnabled)
-        if (!firstAvailable) {
-          setMarketOrganizationId(null)
-          setMarketPolicy(null)
-          setMarketRules([])
-          setMarketVisibleRuleIds({ release: [], ci: [] })
-          setMarketError('当前没有可用的组织安装包市场。')
-          setMarketLoading(false)
-          return null
-        }
-        setMarketOrganizationId(firstAvailable.id)
-        return loadMarketRulesRef.current({ organizationId: firstAvailable.id }).then((payload) => ({
-          organizationId: firstAvailable.id,
-          payload,
-        }))
-      })
-      .then((result) => {
-        if (!result || cancelled || requestId !== marketDetailRequestIdRef.current) return
-        const { organizationId, payload: rulesPayload } = result
-        setMarketPolicy(rulesPayload.policy)
-        setMarketVisibleRuleIds(rulesPayload.visibleRuleIds)
-        setMarketRules(rulesPayload.rules)
-        const activeChannel = rulesPayload.policy.channels.release.enabled && rulesPayload.visibleRuleIds.release.length > 0
-          ? 'release'
-          : rulesPayload.policy.channels.ci.enabled && rulesPayload.visibleRuleIds.ci.length > 0 ? 'ci' : 'release'
-        setMarketChannel(activeChannel)
-        const visibleIds = rulesPayload.visibleRuleIds[activeChannel]
-        const nextPackage = visibleIds[0] ?? ''
-        setMarketSelectedPackage(nextPackage)
-        const expireMinutes = packageMarketExpireOptions.some(
-          (option) => option.value === rulesPayload.expireMinutes,
-        )
-          ? rulesPayload.expireMinutes
-          : packageMarketExpireOptions[0].value
-        setMarketExpireMinutes(expireMinutes)
-        if (!nextPackage || !rulesPayload.policy.enabled) {
-          setMarketDetail(null)
-          setMarketLoading(false)
-          return
-        }
-        void refreshMarketDetailRef.current({
-          expireMinutes,
-          marketRules: rulesPayload.rules,
-          visibleRuleIds: rulesPayload.visibleRuleIds,
-          organizationId,
-          packageId: nextPackage,
-          channel: activeChannel,
-        })
-      })
+    void loadMarketContext(organizationId, requestId)
       .catch((error) => {
-        if (cancelled || requestId !== marketDetailRequestIdRef.current) return
-        setMarketOrganizationLoading(false)
+        if (
+          cancelled ||
+          organizationId !== currentOrganizationIdRef.current ||
+          requestId !== marketDetailRequestIdRef.current
+        ) return
+        setMarketContextLoading(false)
         setMarketError(error instanceof Error ? error.message : '包市场读取失败')
         setMarketLoading(false)
       })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [organizationId])
 
   return (
     <section className="package-market-workspace" aria-label="安装包市场">
       <div className="package-market-grid">
           <div className="package-market-sidebar">
-            <Label>
-              组织上下文
-              <Select
-                value={marketOrganizationId == null ? '' : String(marketOrganizationId)}
-                onValueChange={(value) => {
-                  const organizationId = Number(value)
-                  if (!Number.isSafeInteger(organizationId) || organizationId <= 0) return
-                  const requestId = ++marketDetailRequestIdRef.current
-                  setMarketLoading(true)
-                  setMarketError('')
-                  void loadMarketOrganization(organizationId, requestId).catch((error) => {
-                    if (requestId !== marketDetailRequestIdRef.current) return
-                    setMarketOrganizationLoading(false)
-                    setMarketError(error instanceof Error ? error.message : '组织安装包市场读取失败')
-                    setMarketLoading(false)
-                  })
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={marketOrganizationLoading ? '正在读取组织...' : '选择组织'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {marketOrganizations.filter((organization) => organization.packageMarketEnabled).map((organization) => (
-                    <SelectItem key={organization.id} value={String(organization.id)}>
-                      {organization.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Label>
             <Label>
               搜索
               <Input
@@ -1215,7 +1132,7 @@ export function PackageMarketBrowser({
               variant={marketIncludeAll ? 'default' : 'outline'}
               type="button"
               aria-pressed={marketIncludeAll}
-              disabled={marketOrganizationId == null || marketPolicy == null || marketOrganizationLoading}
+              disabled={marketPolicy == null || marketContextLoading}
               title={marketIncludeAll ? '关闭全部包展示' : '展示全部包'}
               onClick={() => {
                 const nextIncludeAll = !marketIncludeAll
@@ -1302,7 +1219,7 @@ export function PackageMarketBrowser({
                 渠道
                 <Select
                   value={marketChannel}
-                  disabled={marketOrganizationId == null || marketPolicy == null || marketOrganizationLoading}
+                  disabled={marketPolicy == null || marketContextLoading}
                   onValueChange={(value) => {
                     const next = value as PackageMarketChannel
                     if (!marketPolicy?.channels[next].enabled) return
@@ -1348,7 +1265,7 @@ export function PackageMarketBrowser({
                 架构
                 <Select
                   value={marketArch}
-                  disabled={marketOrganizationId == null || marketPolicy == null || marketOrganizationLoading}
+                  disabled={marketPolicy == null || marketContextLoading}
                   onValueChange={(value) => {
                     const next = value as 'amd64' | 'arm64'
                     setMarketArch(next)
@@ -1476,9 +1393,7 @@ export function PackageMarketBrowser({
                                     expireMinutes: marketExpireMinutes,
                                     includeAll: marketIncludeAll,
                                     requestId: marketDetailRequestIdRef.current,
-                                    requestContext: marketOrganizationId == null
-                                      ? undefined
-                                      : { organizationId: marketOrganizationId },
+                                    requestContext: { organizationId },
                                     rules: selectedMarketDependencyRules,
                                     selectedVersions,
                                   })
