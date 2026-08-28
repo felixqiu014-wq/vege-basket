@@ -1947,7 +1947,7 @@ function App() {
   const canNavigateToDeveloperBugs = SHOW_DEVELOPER_ASSIGNED_BUGS_MODULE && (
     isDeveloperRole || isOrganizationAdmin
   )
-  const canNavigateToTestWorkbench = authUser?.activeRole === 'tester' || isOrganizationAdmin
+  const canNavigateToTestWorkbench = authUser?.activeRole === 'tester'
 
   useEffect(() => {
     setAssignedBugCommentReadAtByBugId(loadAssignedBugCommentReadAt(authUser?.id))

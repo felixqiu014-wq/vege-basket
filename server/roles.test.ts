@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   canAssumeUserRole,
@@ -6,6 +7,8 @@ import {
   isUserRole,
   isSwitchableUserRole,
 } from './roles.ts'
+
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 
 test('organization administrator is an additive capability, not a switchable role', () => {
   assert.equal(isSwitchableUserRole('organization_admin'), false)
@@ -19,6 +22,14 @@ test('organization administrator can assume every business role', () => {
   assert.equal(canAssumeUserRole(['organization_admin'], 'developer'), true)
   assert.equal(canAssumeUserRole(['organization_admin'], 'tester'), true)
   assert.equal(canAssumeUserRole(['tester'], 'developer'), false)
+})
+
+test('developer navigation keeps the test workbench hidden until the tester persona is active', () => {
+  assert.match(
+    appSource,
+    /const canNavigateToTestWorkbench = authUser\?\.activeRole === 'tester'/u,
+  )
+  assert.match(appSource, /if \(view === 'testing'\) return user\.activeRole === 'tester'/u)
 })
 
 test('delivery is no longer an account role', () => {
