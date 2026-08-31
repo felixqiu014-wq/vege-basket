@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import {
   formatPackageMarketTimestamp,
@@ -227,6 +231,94 @@ test('returns bundled package market rules without OSS credentials', async () =>
         process.env[key] = previous[key]
       }
     }
+  }
+})
+
+test('loads component prefixes and page-kind metadata from the bundled YAML', async () => {
+  const rules = await listPackageMarketRules()
+  const apps = rules.find((rule) => rule.id === 'sealos-pro')
+  assert.deepEqual(apps?.roots, ['offline/pro/'])
+  assert.deepEqual(apps?.pageKind, { code: 'apps', key: 'app', labelZh: '应用' })
+  assert.deepEqual(
+    rules.find((rule) => rule.id === 'devbox-runtime')?.dependencyRoots,
+    ['offline/sealos-apps/devbox/devbox/runtime/packages/'],
+  )
+  assert.equal(rules.some((rule) => rule.id === 'pro:mysql'), false)
+})
+
+test('uses YAML middleware discovery roots for object-key authorization', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'veges-package-market-'))
+  const rulesFile = join(directory, 'rules.yaml')
+  writeFileSync(rulesFile, `
+page_kinds:
+  apps:
+    key: app
+    label_zh: 应用
+  middleware:
+    key: pro
+    label_zh: 中间件
+    discovery:
+      roots:
+        - custom/middleware
+  dependency:
+    key: dependency
+    label_zh: 依赖
+  database:
+    key: db
+    label_zh: 数据库
+rules:
+  demo:
+    name: demo
+    category: apps
+    roots:
+      - custom/demo
+    file_name_formats:
+      - demo-%s-%s.tar.gz
+  postgres:
+    name: postgres
+    category: database
+    roots:
+      - custom/postgres
+    file_name_formats:
+      - postgres-%s-%s.tar.gz
+`)
+
+  try {
+    const moduleUrl = new URL('./package-market.ts', import.meta.url).href
+    const result = spawnSync(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '-e', `
+        const market = await import(${JSON.stringify(moduleUrl)})
+        console.log(JSON.stringify({
+          configured: market.isAllowedPackageMarketObjectKey('custom/middleware/mysql/mysql-v1-amd64.tar.gz'),
+          default: market.isAllowedPackageMarketObjectKey('offline/sealos-pro/mysql/mysql-v1-amd64.tar.gz'),
+          rules: await market.listPackageMarketRules(),
+        }))
+      `],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PACKAGE_MARKET_RULES_FILE: rulesFile,
+          OSS_ENDPOINT: '',
+          OSS_ACCESS_KEY_ID: '',
+          OSS_ACCESS_KEY_SECRET: '',
+          OSS_BUCKET: '',
+        },
+        encoding: 'utf8',
+      },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    const output = JSON.parse(result.stdout.trim())
+    assert.equal(output.configured, true)
+    assert.equal(output.default, false)
+    assert.deepEqual(output.rules.find((rule: { id: string }) => rule.id === 'postgres')?.pageKind, {
+      code: 'database',
+      key: 'db',
+      labelZh: '数据库',
+    })
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 })
 

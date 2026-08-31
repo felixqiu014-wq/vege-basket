@@ -131,7 +131,7 @@ spec:
       default: ''
       required: true
     PACKAGE_MARKET_MIDDLEWARE_ROOT:
-      description: Optional OSS middleware root for package market browsing.
+      description: Compatibility fallback for middleware discovery; preferred roots are configured in package-market YAML page_kinds.middleware.discovery.roots.
       type: string
       default: ''
       required: false

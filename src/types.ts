@@ -433,18 +433,24 @@ export type ProjectPackageTimeline = {
   mentionableMembers: Array<{ id: number; name: string }>
 }
 
+export type PackageMarketPageKind = {
+  code: string
+  key: string
+  labelZh: string
+}
+
 export type PackageMarketRule = {
   id: string
   name: string
-  category: 'apps' | 'middleware' | 'dependency'
-  mode: 'release' | 'flat' | 'mixed' | 'pro-middleware'
-  releaseRoots: string[]
-  flatFileRoots: string[]
+  category: string
+  mode: 'release' | 'pro-middleware'
+  roots: string[]
   dependencyRoots?: string[]
   dependencyFilePatterns?: string[]
   parent?: string
   fileNameFormats: string[]
   ciFileNameFormats: string[]
+  pageKind?: PackageMarketPageKind
 }
 
 export type PackageMarketVersion = {

@@ -107,7 +107,7 @@
     },
     "PACKAGE_MARKET_MIDDLEWARE_ROOT": {
       "category": "optional",
-      "description": "Optional OSS middleware root prefix."
+      "description": "Compatibility fallback for middleware discovery roots; YAML page_kinds.middleware.discovery.roots takes precedence."
     },
     "PACKAGE_MARKET_BASE_OBJECT_TEMPLATE": {
       "category": "optional",

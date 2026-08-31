@@ -104,7 +104,7 @@ OSS and package market:
 | `OSS_ENDPOINT` | Required HTTPS origin when OSS features are used. |
 | `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_BUCKET` | OSS credentials and bucket. |
 | `PACKAGE_MARKET_RULES_FILE` | Defaults to `server/trial-combo-package-rules.yaml`. |
-| `PACKAGE_MARKET_MIDDLEWARE_ROOT` | Allowed middleware prefix. |
+| `PACKAGE_MARKET_MIDDLEWARE_ROOT` | Compatibility fallback for middleware discovery roots. YAML `page_kinds.middleware.discovery.roots` takes precedence. |
 | `PACKAGE_MARKET_BASE_OBJECT_TEMPLATE` | Compatibility template for legacy base-package objects. Apps rules take precedence. |
 | `PACKAGE_MARKET_BASE_LIST_PREFIX_TEMPLATE` | Compatibility listing prefix for legacy base-package objects. |
 | `PACKAGE_MARKET_DOWNLOAD_EXPIRE_SECONDS` | Default signed URL lifetime; fallback is 30 minutes. |
@@ -116,6 +116,13 @@ Compatibility aliases remain accepted for `OSS_UI_MIDDLEWARE_ROOT`,
 `OSS_UI_BASE_OBJECT_TEMPLATE`, `OSS_UI_BASE_LIST_PREFIX_TEMPLATE`,
 `OSS_UI_DOWNLOAD_EXPIRE_SECONDS`, and `TRIAL_COMBO_PACKAGE_RULES_FILE`. New deployments
 should use the `PACKAGE_MARKET_*` names.
+
+The package-market YAML uses `roots` as component prefixes. Release objects are
+read from `<root>/release/<version>/` and CI objects from
+`<root>/ci/<branch>/<hash>/`. Flat-file roots are no longer supported. Middleware
+is discovered automatically from the first-level directories under
+`page_kinds.middleware.discovery.roots`; the environment variable above remains
+only as a compatibility fallback.
 
 ## Deployment Inputs
 

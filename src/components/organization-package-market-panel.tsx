@@ -64,10 +64,18 @@ const channelDescriptions: Record<OrganizationPackageMarketChannel, string> = {
   ci: '测试包渠道',
 }
 
-const categoryLabels: Record<OrganizationPackageMarketCatalogRule['category'], string> = {
+const categoryLabels: Record<string, string> = {
   apps: '应用',
   dependency: '依赖',
   middleware: '中间件',
+}
+
+function packageMarketCategoryCode(rule: OrganizationPackageMarketCatalogRule) {
+  return rule.pageKind?.code ?? rule.category
+}
+
+function packageMarketCategoryLabel(rule: OrganizationPackageMarketCatalogRule) {
+  return rule.pageKind?.labelZh ?? categoryLabels[rule.category] ?? rule.category
 }
 
 const selectionModeLabels: Record<OrganizationPackageMarketSelectionMode, string> = {
@@ -127,6 +135,14 @@ export function OrganizationPackageMarketPanel({
   const configuredRuleIds = policy?.selection.ruleIds ?? emptyRuleIds
   const configuredRuleIdSet = useMemo(() => new Set(configuredRuleIds), [configuredRuleIds])
   const configuredCount = selectableRules.filter((rule) => configuredRuleIdSet.has(rule.canonicalId)).length
+  const categoryOptions = useMemo(() => {
+    const options = new Map<string, string>()
+    selectableRules.forEach((rule) => {
+      const code = packageMarketCategoryCode(rule)
+      if (!options.has(code)) options.set(code, packageMarketCategoryLabel(rule))
+    })
+    return [...options.entries()].map(([code, label]) => ({ code, label }))
+  }, [selectableRules])
   const isExclusionMode = policy?.selection.mode === 'excluded'
   const configuredLabel = isExclusionMode ? '已禁止' : '已选'
   const ruleActionLabel = isExclusionMode ? '禁止' : '选择'
@@ -371,8 +387,8 @@ export function OrganizationPackageMarketPanel({
                   <SelectTrigger aria-label="筛选安装包分类"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">全部分类</SelectItem>
-                    {(['apps', 'middleware'] as const).map((option) => (
-                      <SelectItem key={option} value={option}>{categoryLabels[option]}</SelectItem>
+                    {categoryOptions.map((option) => (
+                      <SelectItem key={option.code} value={option.code}>{option.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -454,7 +470,7 @@ export function OrganizationPackageMarketPanel({
                         <span className="organization-package-market-rule-check" aria-hidden="true" />
                         <span className="organization-package-market-rule-name">
                           <strong>{rule.name}</strong>
-                          <small>{categoryLabels[rule.category]}</small>
+                          <small>{packageMarketCategoryLabel(rule)}</small>
                         </span>
                         <code>{rule.canonicalId}</code>
                       </label>

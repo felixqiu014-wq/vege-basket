@@ -5,6 +5,10 @@ export const organizationPackageMarketPageSizes = [12, 24, 48] as const
 export type OrganizationPackageMarketPageSize = (typeof organizationPackageMarketPageSizes)[number]
 export type OrganizationPackageMarketCategory = 'all' | OrganizationPackageMarketCatalogRule['category']
 
+function packageMarketCategoryCode(rule: Pick<OrganizationPackageMarketCatalogRule, 'category' | 'pageKind'>) {
+  return rule.pageKind?.code ?? rule.category
+}
+
 export function selectableOrganizationPackageMarketRules(
   rules: readonly OrganizationPackageMarketCatalogRule[],
 ) {
@@ -24,7 +28,7 @@ export function filterOrganizationPackageMarketRules(
   const category = options.category ?? 'all'
   const selectedIds = new Set(options.selectedIds ?? [])
   return selectableOrganizationPackageMarketRules(rules).filter((rule) => {
-    const matchesCategory = category === 'all' || rule.category === category
+    const matchesCategory = category === 'all' || packageMarketCategoryCode(rule) === category
     const matchesQuery = !query || [rule.name, rule.id, rule.canonicalId]
       .some((value) => value.toLocaleLowerCase().includes(query))
     const matchesSelection = !options.onlySelected || selectedIds.has(rule.canonicalId)

@@ -34,7 +34,7 @@ export type OrganizationPackageMarketPolicyPatch = {
 }
 
 export type PackageMarketRuleIdentity = {
-  category: 'apps' | 'middleware' | 'dependency'
+  category: string
   dependencyRoots?: readonly string[]
   id: string
   parent?: string

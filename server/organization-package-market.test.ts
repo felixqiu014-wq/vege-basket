@@ -60,15 +60,12 @@ function packageMarketPolicyRule(id: string): PackageMarketRule {
     name: id,
     category: 'apps',
     mode: 'release',
-    releaseRoots: [],
-    flatFileRoots: [],
+    pageKind: { code: 'apps', key: 'app', labelZh: '应用' },
+    roots: [],
     dependencyRoots: [],
     dependencyFilePatterns: [],
     fileNameFormats: [],
     ciFileNameFormats: [],
-    flatFileNamePrefix: '',
-    flatFileNameSuffix: '',
-    flatFileNameSuffixes: [],
     parent: '',
   }
 }
@@ -307,22 +304,19 @@ test('package item object keys stay bound to the claimed package rule and channe
     name: 'allowed',
     category: 'apps',
     mode: 'release',
-    releaseRoots: ['offline/sealos-apps/allowed/release/'],
-    flatFileRoots: [],
+    pageKind: { code: 'apps', key: 'app', labelZh: '应用' },
+    roots: ['offline/sealos-apps/allowed'],
     dependencyRoots: [],
     dependencyFilePatterns: [],
     fileNameFormats: ['allowed-cluster-%s-%s.tar.gz'],
     ciFileNameFormats: ['allowed-cluster-main-%s-%s.tar.gz'],
-    flatFileNamePrefix: '',
-    flatFileNameSuffix: '',
-    flatFileNameSuffixes: [],
     parent: '',
   }
   const hiddenRule: PackageMarketRule = {
     ...allowedRule,
     id: 'hidden',
     name: 'hidden',
-    releaseRoots: ['offline/sealos-apps/hidden/release/'],
+    roots: ['offline/sealos-apps/hidden'],
     fileNameFormats: ['hidden-cluster-%s-%s.tar.gz'],
   }
   const rules = [allowedRule, hiddenRule]

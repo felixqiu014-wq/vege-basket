@@ -526,8 +526,7 @@ function getPackageMarketBaseRules(): PackageMarketRule[] {
       name: 'sealos-pro',
       category: 'apps',
       mode: 'release',
-      releaseRoots: [],
-      flatFileRoots: [],
+      roots: [],
       fileNameFormats: [],
       ciFileNameFormats: [],
     },
@@ -536,12 +535,45 @@ function getPackageMarketBaseRules(): PackageMarketRule[] {
       name: 'sealos-oss',
       category: 'apps',
       mode: 'release',
-      releaseRoots: [],
-      flatFileRoots: [],
+      roots: [],
       fileNameFormats: [],
       ciFileNameFormats: [],
     },
   ]
+}
+
+type PackageMarketRuleGroup = {
+  id: string
+  label: string
+  rules: PackageMarketRule[]
+}
+
+function packageMarketRuleGroupLabel(rule: PackageMarketRule) {
+  if (rule.pageKind?.labelZh) return rule.pageKind.labelZh
+  if (rule.category === 'apps') return '应用'
+  if (rule.category === 'middleware') return '中间件'
+  return rule.category
+}
+
+function groupPackageMarketRules(rules: readonly PackageMarketRule[]): PackageMarketRuleGroup[] {
+  const groups = new Map<string, PackageMarketRuleGroup>()
+  for (const rule of rules) {
+    const isBase = rule.id === 'base-pro' || rule.id === 'base-oss'
+    if (rule.category === 'dependency') continue
+    if (!isBase && ['sealos-pro', 'sealos-oss'].includes(rule.id)) continue
+    const id = isBase ? 'base' : rule.pageKind?.code ?? rule.category
+    const existing = groups.get(id)
+    if (existing) {
+      existing.rules.push(rule)
+      continue
+    }
+    groups.set(id, {
+      id,
+      label: isBase ? '基础包' : packageMarketRuleGroupLabel(rule),
+      rules: [rule],
+    })
+  }
+  return [...groups.values()]
 }
 
 function PackageMarketRuleList({ children }: { children: ReactNode }) {
@@ -676,7 +708,7 @@ export function PackageMarketBrowser({
   const [marketDependencyDetails, setMarketDependencyDetails] = useState<PackageMarketDependencyState[]>([])
   const [marketLoading, setMarketLoading] = useState(false)
   const [marketError, setMarketError] = useState('')
-  const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<'base' | 'apps' | 'middleware', boolean>>({
+  const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<string, boolean>>({
     base: true,
     apps: true,
     middleware: true,
@@ -726,16 +758,7 @@ export function PackageMarketBrowser({
     })
   }, [marketRules, marketSearch, marketVisibleRuleIds, marketChannel])
 
-  const groupedMarketRules = useMemo(() => {
-    const base = filteredRules.filter((rule) => rule.id === 'base-pro' || rule.id === 'base-oss')
-    const apps = filteredRules.filter(
-      (rule) =>
-        rule.category === 'apps' &&
-        !['base-pro', 'base-oss', 'sealos-pro', 'sealos-oss'].includes(rule.id),
-    )
-    const middleware = filteredRules.filter((rule) => rule.category === 'middleware')
-    return { apps, base, middleware }
-  }, [filteredRules])
+  const groupedMarketRules = useMemo(() => groupPackageMarketRules(filteredRules), [filteredRules])
 
   const selectedMarketDependencyRules = useMemo(() => {
     if (!marketPolicy) return []
@@ -1144,19 +1167,9 @@ export function PackageMarketBrowser({
               {marketIncludeAll ? '仅展示规则包' : '展示全部包'}
             </Button>
             <PackageMarketRuleList>
-              {(
-                [
-                  { id: 'base' as const, label: '基础包', rules: groupedMarketRules.base },
-                  { id: 'apps' as const, label: 'APPS', rules: groupedMarketRules.apps },
-                  { id: 'middleware' as const, label: '中间件', rules: groupedMarketRules.middleware },
-                ] satisfies Array<{
-                  id: 'base' | 'apps' | 'middleware'
-                  label: string
-                  rules: PackageMarketRule[]
-                }>
-              ).map((group) => (
+              {groupedMarketRules.map((group) => (
                 <section
-                  className={marketExpandedGroups[group.id] ? 'package-market-group' : 'package-market-group collapsed'}
+                  className={marketExpandedGroups[group.id] !== false ? 'package-market-group' : 'package-market-group collapsed'}
                   key={group.id}
                 >
                   <button
@@ -1165,18 +1178,18 @@ export function PackageMarketBrowser({
                     onClick={() =>
                       setMarketExpandedGroups((current) => ({
                         ...current,
-                        [group.id]: !current[group.id],
+                        [group.id]: current[group.id] === false,
                       }))
                     }
                   >
                     <span>{group.label}</span>
-                    {marketExpandedGroups[group.id] ? (
+                    {marketExpandedGroups[group.id] !== false ? (
                       <CaretDown size={14} weight="bold" />
                     ) : (
                       <CaretRight size={14} weight="bold" />
                     )}
                   </button>
-                  {marketExpandedGroups[group.id] ? (
+                  {marketExpandedGroups[group.id] !== false ? (
                     <div className="package-market-group-list">
                       {group.rules.length === 0 ? (
                         <p className="package-market-group-empty">当前分组没有匹配到安装包。</p>
@@ -1681,7 +1694,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
   const [marketDependencyDetails, setMarketDependencyDetails] = useState<PackageMarketDependencyState[]>([])
   const [marketLoading, setMarketLoading] = useState(false)
   const [marketError, setMarketError] = useState('')
-  const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<'base' | 'apps' | 'middleware', boolean>>({
+  const [marketExpandedGroups, setMarketExpandedGroups] = useState<Record<string, boolean>>({
     base: true,
     apps: true,
     middleware: true,
@@ -2081,16 +2094,7 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
     })
   }, [marketChannel, marketRules, marketSearch, marketVisibleRuleIds])
 
-  const groupedMarketRules = useMemo(() => {
-    const base = filteredRules.filter((rule) => rule.id === 'base-pro' || rule.id === 'base-oss')
-    const apps = filteredRules.filter(
-      (rule) =>
-        rule.category === 'apps' &&
-        !['base-pro', 'base-oss', 'sealos-pro', 'sealos-oss'].includes(rule.id),
-    )
-    const middleware = filteredRules.filter((rule) => rule.category === 'middleware')
-    return { apps, base, middleware }
-  }, [filteredRules])
+  const groupedMarketRules = useMemo(() => groupPackageMarketRules(filteredRules), [filteredRules])
   const selectedMarketDependencyRules = useMemo(() => {
     if (!marketPolicy) return []
     const selectedPackageId = canonicalPackageMarketRuleId(marketSelectedPackage)
@@ -4298,19 +4302,9 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
               {marketIncludeAll ? '仅展示规则包' : '展示全部包'}
             </Button>
               <PackageMarketRuleList>
-                {(
-                [
-                  { id: 'base' as const, label: '基础包', rules: groupedMarketRules.base },
-                  { id: 'apps' as const, label: 'APPS', rules: groupedMarketRules.apps },
-                  { id: 'middleware' as const, label: '中间件', rules: groupedMarketRules.middleware },
-                ] satisfies Array<{
-                  id: 'base' | 'apps' | 'middleware'
-                    label: string
-                    rules: PackageMarketRule[]
-                  }>
-                ).map((group) => (
+                {groupedMarketRules.map((group) => (
                   <section
-                    className={marketExpandedGroups[group.id] ? 'package-market-group' : 'package-market-group collapsed'}
+                    className={marketExpandedGroups[group.id] !== false ? 'package-market-group' : 'package-market-group collapsed'}
                     key={group.id}
                   >
                     <button
@@ -4319,18 +4313,18 @@ export const ProjectPackageWorkbench = forwardRef<ProjectPackageWorkbenchHandle,
                       onClick={() =>
                         setMarketExpandedGroups((current) => ({
                           ...current,
-                          [group.id]: !current[group.id],
+                          [group.id]: current[group.id] === false,
                         }))
                       }
                     >
                       <span>{group.label}</span>
-                      {marketExpandedGroups[group.id] ? (
+                    {marketExpandedGroups[group.id] !== false ? (
                         <CaretDown size={14} weight="bold" />
                       ) : (
                         <CaretRight size={14} weight="bold" />
                       )}
                     </button>
-                    {marketExpandedGroups[group.id] ? (
+                    {marketExpandedGroups[group.id] !== false ? (
                       <div className="package-market-group-list">
                         {group.rules.length === 0 ? (
                           <p className="package-market-group-empty">当前分组没有匹配到安装包。</p>
