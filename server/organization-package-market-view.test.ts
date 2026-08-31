@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   filterOrganizationPackageMarketRules,
+  organizationPackageMarketCategoryState,
   organizationPackageMarketPoliciesEqual,
   paginateOrganizationPackageMarketRules,
+  toggleOrganizationPackageMarketCategory,
   toggleOrganizationPackageMarketRule,
 } from '../src/organization-package-market-view.ts'
 import type { OrganizationPackageMarketCatalogRule } from '../src/organization-types.ts'
@@ -113,6 +115,36 @@ test('package market pagination clamps the requested page and keeps a stable pag
 test('package market selection toggles one stable rule id at a time', () => {
   assert.deepEqual(toggleOrganizationPackageMarketRule([], 'terminal'), ['terminal'])
   assert.deepEqual(toggleOrganizationPackageMarketRule(['terminal', 'registry'], 'terminal'), ['registry'])
+})
+
+test('package market category toggles expand selected mode across the whole category', () => {
+  assert.equal(
+    organizationPackageMarketCategoryState(['terminal'], ['terminal', 'base-oss'], 'selected'),
+    'mixed',
+  )
+  assert.deepEqual(
+    toggleOrganizationPackageMarketCategory(['terminal', 'registry'], ['terminal', 'base-oss'], 'selected'),
+    ['terminal', 'registry', 'base-oss'],
+  )
+  assert.deepEqual(
+    toggleOrganizationPackageMarketCategory(['terminal', 'base-oss', 'registry'], ['terminal', 'base-oss'], 'selected'),
+    ['registry'],
+  )
+})
+
+test('package market category toggles invert excluded mode without touching other categories', () => {
+  assert.equal(
+    organizationPackageMarketCategoryState(['terminal'], ['terminal', 'base-oss'], 'excluded'),
+    'mixed',
+  )
+  assert.deepEqual(
+    toggleOrganizationPackageMarketCategory(['terminal', 'registry'], ['terminal', 'base-oss'], 'excluded'),
+    ['registry'],
+  )
+  assert.deepEqual(
+    toggleOrganizationPackageMarketCategory(['registry'], ['terminal', 'base-oss'], 'excluded'),
+    ['registry', 'terminal', 'base-oss'],
+  )
 })
 
 test('package market policy equality ignores selection ordering', () => {

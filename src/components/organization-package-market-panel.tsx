@@ -34,7 +34,9 @@ import {
   organizationPackageMarketPageSizes,
   organizationPackageMarketPoliciesEqual,
   paginateOrganizationPackageMarketRules,
+  organizationPackageMarketCategoryState,
   selectableOrganizationPackageMarketRules,
+  toggleOrganizationPackageMarketCategory,
   toggleOrganizationPackageMarketRule,
   type OrganizationPackageMarketCategory,
   type OrganizationPackageMarketPageSize,
@@ -89,11 +91,13 @@ const emptyRuleIds: string[] = []
 function Toggle({
   checked,
   disabled,
+  mixed,
   label,
   onChange,
 }: {
   checked: boolean
   disabled?: boolean
+  mixed?: boolean
   label: string
   onChange: (checked: boolean) => void
 }) {
@@ -101,7 +105,9 @@ function Toggle({
     <label className="organization-package-market-toggle">
       <input
         aria-label={label}
+        aria-checked={mixed ? 'mixed' : checked}
         checked={checked}
+        data-mixed={mixed ? 'true' : undefined}
         disabled={disabled}
         type="checkbox"
         onChange={(event) => onChange(event.target.checked)}
@@ -135,14 +141,24 @@ export function OrganizationPackageMarketPanel({
   const configuredRuleIds = policy?.selection.ruleIds ?? emptyRuleIds
   const configuredRuleIdSet = useMemo(() => new Set(configuredRuleIds), [configuredRuleIds])
   const configuredCount = selectableRules.filter((rule) => configuredRuleIdSet.has(rule.canonicalId)).length
-  const categoryOptions = useMemo(() => {
-    const options = new Map<string, string>()
+  const categoryRows = useMemo(() => {
+    const groups = new Map<string, { code: string; label: string; ruleIds: string[] }>()
     selectableRules.forEach((rule) => {
       const code = packageMarketCategoryCode(rule)
-      if (!options.has(code)) options.set(code, packageMarketCategoryLabel(rule))
+      const existing = groups.get(code)
+      if (existing) {
+        existing.ruleIds.push(rule.canonicalId)
+      } else {
+        groups.set(code, {
+          code,
+          label: packageMarketCategoryLabel(rule),
+          ruleIds: [rule.canonicalId],
+        })
+      }
     })
-    return [...options.entries()].map(([code, label]) => ({ code, label }))
+    return [...groups.values()]
   }, [selectableRules])
+  const categoryOptions = categoryRows.map(({ code, label }) => ({ code, label }))
   const isExclusionMode = policy?.selection.mode === 'excluded'
   const configuredLabel = isExclusionMode ? '已禁止' : '已选'
   const ruleActionLabel = isExclusionMode ? '禁止' : '选择'
@@ -208,6 +224,34 @@ export function OrganizationPackageMarketPanel({
     if (configuredFilteredCount === 0) return
     const filteredIds = new Set(filteredRules.map((rule) => rule.canonicalId))
     updateSelection({ ruleIds: configuredRuleIds.filter((id) => !filteredIds.has(id)) })
+  }
+
+  function toggleCategory(categoryRow: (typeof categoryRows)[number]) {
+    if (policy!.selection.mode === 'all') {
+      updateSelection({ mode: 'excluded', ruleIds: [...categoryRow.ruleIds] })
+      return
+    }
+    const categoryIds = new Set(categoryRow.ruleIds)
+    const categoryState = organizationPackageMarketCategoryState(
+      configuredRuleIds,
+      categoryRow.ruleIds,
+      policy!.selection.mode,
+    )
+    const shouldEnable = categoryState !== 'enabled'
+
+    // In exclusion mode, the server requires at least one visible package whenever
+    // an enabled channel is configured. Keep the same guard for category actions.
+    if (isExclusionMode && !shouldEnable && selectableRules.length > 0 && selectableRules.every((rule) => (
+      configuredRuleIdSet.has(rule.canonicalId) || categoryIds.has(rule.canonicalId)
+    ))) return
+
+    updateSelection({
+      ruleIds: toggleOrganizationPackageMarketCategory(
+        configuredRuleIds,
+        categoryRow.ruleIds,
+        policy!.selection.mode,
+      ),
+    })
   }
 
   function updateSelectionMode(mode: OrganizationPackageMarketSelectionMode) {
@@ -371,8 +415,59 @@ export function OrganizationPackageMarketPanel({
             </div>
           </div>
 
-          {showsRuleSelector ? (
-            <>
+          <>
+              <section className="organization-package-market-category-section" aria-labelledby="organization-package-market-category-heading">
+                <div className="organization-package-market-category-heading">
+                  <div>
+                    <h3 id="organization-package-market-category-heading">按类别快速设置</h3>
+                    <p>{policy.selection.mode === 'all' ? '当前所有类别均对成员可见；切换范围模式后可单独关闭类别。' : '一次开关整个类别，类别内的安装包会同步更新。'}</p>
+                  </div>
+                  <span>{categoryRows.length} 个类别 · 开 = 对成员可见</span>
+                </div>
+                <div className="organization-package-market-category-grid" role="group" aria-label="安装包类别开关">
+                  {categoryRows.map((categoryRow) => {
+                    const configuredInCategory = categoryRow.ruleIds.filter((id) => configuredRuleIdSet.has(id)).length
+                    const categoryState = organizationPackageMarketCategoryState(
+                      configuredRuleIds,
+                      categoryRow.ruleIds,
+                      policy.selection.mode,
+                    )
+                    const categoryEnabled = policy.selection.mode === 'all' || categoryState === 'enabled'
+                    const mixed = policy.selection.mode !== 'all' && categoryState === 'mixed'
+                    const disablingCategoryWouldHideEverything = isExclusionMode
+                      && categoryEnabled
+                      && selectableRules.length > 0
+                      && selectableRules.every((rule) => (
+                        configuredRuleIdSet.has(rule.canonicalId) || categoryRow.ruleIds.includes(rule.canonicalId)
+                      ))
+                    return (
+                      <div
+                        className={[
+                          'organization-package-market-category-card',
+                          categoryEnabled ? 'enabled' : '',
+                          mixed ? 'mixed' : '',
+                        ].filter(Boolean).join(' ')}
+                        key={categoryRow.code}
+                      >
+                        <div className="organization-package-market-category-copy">
+                          <strong>{categoryRow.label}</strong>
+                          <span>{categoryRow.ruleIds.length} 个安装包 · {policy.selection.mode === 'all' ? '全部可见' : `${configuredInCategory} 个${isExclusionMode ? '已禁止' : '已开启'}`}</span>
+                        </div>
+                        <Toggle
+                          checked={categoryEnabled}
+                          disabled={selectionDisabled || disablingCategoryWouldHideEverything}
+                          label={`${categoryEnabled ? '关闭' : '开启'}${categoryRow.label}类别`}
+                          mixed={mixed}
+                          onChange={() => toggleCategory(categoryRow)}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+
+            {showsRuleSelector ? (
+              <>
               <div className="organization-package-market-filters">
                 <div className="organization-package-market-search">
                   <MagnifyingGlass aria-hidden="true" size={16} />
@@ -526,14 +621,15 @@ export function OrganizationPackageMarketPanel({
                   </Button>
                 </div>
               </div>
-            </>
-          ) : (
+              </>
+            ) : (
             <div className="organization-package-market-all-mode">
               <PackageIcon aria-hidden="true" size={28} weight="duotone" />
               <strong>当前范围显示全部安装包</strong>
               <span>如需限制范围，可切换为“仅显示指定安装包”或“仅禁止指定安装包”。</span>
             </div>
-          )}
+            )}
+          </>
         </section>
       </div>
     </section>

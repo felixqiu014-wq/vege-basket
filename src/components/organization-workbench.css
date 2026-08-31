@@ -2070,6 +2070,122 @@
   font-size: 12px;
 }
 
+.organization-package-market-category-section {
+  min-width: 0;
+  margin-top: 18px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 18px;
+}
+
+.organization-package-market-category-heading {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.organization-package-market-category-heading > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.organization-package-market-category-heading h3 {
+  margin: 0;
+  color: var(--strong);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.organization-package-market-category-heading p,
+.organization-package-market-category-heading > span {
+  margin: 0;
+  color: var(--muted-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.organization-package-market-category-heading > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.organization-package-market-category-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  align-content: start;
+  max-height: 184px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  gap: 8px;
+  margin-top: 11px;
+  padding: 2px 4px 2px 0;
+}
+
+.organization-package-market-category-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--field) 18%, var(--surface));
+  padding: 10px 11px;
+  transition: border-color 130ms ease, background-color 130ms ease;
+}
+
+.organization-package-market-category-card.enabled {
+  border-color: color-mix(in oklch, var(--brand) 34%, var(--line));
+  background: color-mix(in oklch, var(--brand) 5%, var(--surface));
+}
+
+.organization-package-market-category-card.mixed {
+  border-color: color-mix(in oklch, var(--brand) 24%, var(--line));
+}
+
+.organization-package-market-category-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.organization-package-market-category-copy strong {
+  color: var(--strong);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.organization-package-market-category-copy span {
+  color: var(--muted-text);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.organization-package-market-toggle input[data-mixed='true'] + span {
+  border-color: color-mix(in oklch, var(--brand) 66%, var(--line));
+  background: color-mix(in oklch, var(--brand) 22%, var(--surface));
+}
+
+.organization-package-market-toggle input[data-mixed='true'] + span::after {
+  width: 12px;
+  height: 3px;
+  top: 9px;
+  left: 7px;
+  border-radius: 999px;
+  background: var(--brand);
+  box-shadow: none;
+  transform: none;
+}
+
 .organization-package-market-filters {
   min-width: 0;
   display: grid;
@@ -2461,6 +2577,17 @@
     width: 100%;
   }
 
+  .organization-package-market-category-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .organization-package-market-category-grid {
+    grid-template-columns: 1fr;
+    max-height: 260px;
+  }
+
   .organization-package-market-filters {
     grid-template-columns: minmax(0, 1fr) 32px;
   }
@@ -2519,6 +2646,7 @@
 @media (prefers-reduced-motion: reduce) {
   .organization-package-market-toggle > span,
   .organization-package-market-toggle > span::after,
+  .organization-package-market-category-card,
   .organization-package-market-rule,
   .organization-package-market-spinner {
     animation: none;

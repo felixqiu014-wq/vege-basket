@@ -85,6 +85,7 @@ const fallbackMiddlewareRoots = normalizeList([
 ]).map(normalizePrefix)
 let configuredMiddlewareRoots: string[] | null = null
 let configuredPageKinds: Record<string, PackageMarketPageKind> | null = null
+let configuredDiscoveryRoots: Record<string, string[]> = {}
 const baseObjectTemplate = normalizeString(
   process.env.PACKAGE_MARKET_BASE_OBJECT_TEMPLATE ?? process.env.OSS_UI_BASE_OBJECT_TEMPLATE,
 )
@@ -177,23 +178,39 @@ function pageKindForCategory(category: string): PackageMarketPageKind {
   }
 }
 
-function middlewarePackageId(name: string) {
-  return `${pageKindForCategory('middleware').key}:${name}`
+function discoveredPageKindFromId(packageId: string) {
+  if (!configuredPageKinds) parseRulesFile()
+  const pageKinds = configuredPageKinds ?? {}
+  for (const pageKind of Object.values(pageKinds)) {
+    const roots = configuredDiscoveryRoots[pageKind.code] ?? []
+    if (roots.length === 0) continue
+    const prefix = `${pageKind.key}:`
+    if (packageId.startsWith(prefix)) {
+      return {
+        name: normalizeString(packageId.slice(prefix.length)),
+        pageKind,
+        roots,
+      }
+    }
+  }
+  return null
 }
 
 function middlewareNameFromId(packageId: string) {
+  const discovered = discoveredPageKindFromId(packageId)
+  if (discovered) return discovered.name
   const key = pageKindForCategory('middleware').key
   const prefix = `${key}:`
   return packageId.startsWith(prefix) ? normalizeString(packageId.slice(prefix.length)) : ''
 }
 
-function releaseRootsForRule(rule: Pick<PackageMarketRule, 'category' | 'roots'>) {
-  if (rule.category === 'middleware') return rule.roots
+function releaseRootsForRule(rule: Pick<PackageMarketRule, 'category' | 'mode' | 'roots'>) {
+  if (rule.mode === 'pro-middleware' || rule.category === 'middleware') return rule.roots
   return rule.roots.map((root) => `${normalizePrefix(root)}release/`)
 }
 
-function ciRootsForRule(rule: Pick<PackageMarketRule, 'category' | 'roots'>) {
-  if (rule.category === 'middleware') return []
+function ciRootsForRule(rule: Pick<PackageMarketRule, 'category' | 'mode' | 'roots'>) {
+  if (rule.mode === 'pro-middleware' || rule.category === 'middleware') return []
   return rule.roots.map((root) => `${normalizePrefix(root)}ci/`)
 }
 
@@ -673,19 +690,21 @@ export function isPackageMarketObjectKeyAllowedForRule(params: {
     )
   }
 
-  if (middlewareNameFromId(packageId)) {
+  const discovered = discoveredPageKindFromId(packageId)
+  const middlewareName = discovered?.name || middlewareNameFromId(packageId)
+  if (middlewareName) {
     return proMiddlewareRuleAllowsObjectKey({
       id: packageId,
-      name: middlewareNameFromId(packageId),
-      category: 'middleware',
+      name: middlewareName,
+      category: discovered?.pageKind.code ?? 'middleware',
       mode: 'pro-middleware',
       dependencyRoots: [],
       dependencyFilePatterns: [],
       fileNameFormats: [],
       ciFileNameFormats: [],
       parent: '',
-      pageKind: pageKindForCategory('middleware'),
-      roots: [],
+      pageKind: discovered?.pageKind ?? pageKindForCategory('middleware'),
+      roots: discovered?.roots.map((root) => `${root}${middlewareName}/`) ?? [],
     }, objectKey, params.channel)
   }
   return Boolean(appRuleId && params.channel === 'release' && baseTemplateAllowsObjectKey(packageId, objectKey))
@@ -823,6 +842,7 @@ function parseRulesFile() {
   } | undefined
   const rawPageKinds = parsed?.page_kinds ?? {}
   const pageKinds: Record<string, PackageMarketPageKind> = {}
+  const discoveryRoots: Record<string, string[]> = {}
   configuredPageKinds = null
   for (const [rawCode, rawPageKind] of Object.entries(rawPageKinds)) {
     const code = normalizeString(rawCode).toLowerCase()
@@ -835,11 +855,16 @@ function parseRulesFile() {
       key,
       labelZh: normalizeString(pageKind.label_zh ?? pageKind.labelZh) || code,
     }
+    const roots = normalizeList(
+      (pageKind.discovery as { roots?: unknown[] } | undefined)?.roots ?? [],
+    ).map(normalizePrefix)
+    if (roots.length > 0) discoveryRoots[code] = roots
   }
   for (const category of ['apps', 'middleware', 'dependency'] as const) {
     pageKinds[category] ??= pageKindForCategory(category)
   }
   configuredPageKinds = pageKinds
+  configuredDiscoveryRoots = discoveryRoots
   const configuredRoots = normalizeList(
     (rawPageKinds.middleware?.discovery as { roots?: unknown[] } | undefined)?.roots ??
       parsed?.middleware?.roots ??
@@ -925,41 +950,50 @@ function basePackageDeployType(packageId: string) {
   return packageId === 'base-oss' ? 'oss' : 'pro'
 }
 
-async function publicProMiddlewareRules(client: OSS, excludedNames = new Set<string>()) {
+async function publicDiscoveredPageKindRules(
+  client: OSS,
+  yamlRules: readonly PackageMarketRule[],
+) {
   const items: PackageMarketRule[] = []
-  const seenNames = new Set<string>()
-
-  for (const root of middlewareRootsForConfig()) {
-    const prefixes = await listCommonPrefixes(client, root)
-    for (const prefix of prefixes) {
-      const name = prefix.slice(root.length).replace(/\/$/, '')
-      if (!name || excludedNames.has(name) || seenNames.has(name)) continue
-      seenNames.add(name)
-      items.push({
-        id: middlewarePackageId(name),
-        name,
-        category: 'middleware' as const,
-        mode: 'pro-middleware' as const,
-        pageKind: pageKindForCategory('middleware'),
-        roots: [prefix],
-        dependencyRoots: [],
-        dependencyFilePatterns: [],
-        fileNameFormats: [],
-        ciFileNameFormats: [],
-        parent: '',
-      })
+  const configuredNames = new Set(
+    yamlRules.map((rule) => `${rule.pageKind.code}:${rule.name}`),
+  )
+  const seenIds = new Set<string>()
+  for (const pageKind of Object.values(configuredPageKinds ?? {})) {
+    const roots = configuredDiscoveryRoots[pageKind.code] ?? []
+    if (roots.length === 0) continue
+    for (const root of roots) {
+      const prefixes = await listCommonPrefixes(client, root)
+      for (const prefix of prefixes) {
+        const name = prefix.slice(root.length).replace(/\/$/u, '')
+        const id = `${pageKind.key}:${name}`
+        if (!name || configuredNames.has(`${pageKind.code}:${name}`) || seenIds.has(id)) continue
+        seenIds.add(id)
+        items.push({
+          id,
+          name,
+          category: pageKind.code,
+          mode: 'pro-middleware',
+          pageKind,
+          roots: [prefix],
+          dependencyRoots: [],
+          dependencyFilePatterns: [],
+          fileNameFormats: [],
+          ciFileNameFormats: [],
+          parent: '',
+        })
+      }
     }
   }
-
-  return items.sort((a, b) => a.name.localeCompare(b.name))
+  return items.sort((a, b) => a.id.localeCompare(b.id))
 }
 
-async function proMiddlewareRootForName(client: OSS, name: string) {
-  for (const root of middlewareRootsForConfig()) {
+async function proMiddlewareRootForName(client: OSS, name: string, roots = middlewareRootsForConfig()) {
+  for (const root of roots) {
     const prefixes = await listCommonPrefixes(client, root)
     if (prefixes.includes(`${root}${name}/`)) return `${root}${name}/`
   }
-  return `${middlewareRootsForConfig()[0] ?? defaultMiddlewareRoot}${name}/`
+  return `${roots[0] ?? defaultMiddlewareRoot}${name}/`
 }
 
 function extractProMiddlewareVersion(name: string, fileName: string) {
@@ -1134,8 +1168,8 @@ function newestVersion(objects: Array<{ version: string }>) {
   return versions[0] || ''
 }
 
-async function listProMiddlewareReleaseVersions(client: OSS, name: string, arch: string) {
-  const root = await proMiddlewareRootForName(client, name)
+async function listProMiddlewareReleaseVersions(client: OSS, name: string, arch: string, roots = middlewareRootsForConfig()) {
+  const root = await proMiddlewareRootForName(client, name, roots)
   const objects = await listAllObjects(client, root)
   const versions = new Map<string, { object: OssObject; version: string }>()
 
@@ -1166,10 +1200,11 @@ async function buildProMiddlewarePackage(
   arch: string,
   requestedVersion: string,
   expireSeconds = downloadExpireSeconds,
+  roots = middlewareRootsForConfig(),
 ): Promise<PackageMarketDetail> {
-  const versions = await listProMiddlewareReleaseVersions(client, name, arch)
+  const versions = await listProMiddlewareReleaseVersions(client, name, arch, roots)
   const version = normalizeString(requestedVersion) || versions[0]?.version || ''
-  const root = await proMiddlewareRootForName(client, name)
+  const root = await proMiddlewareRootForName(client, name, roots)
   const objects = await listAllObjects(client, root)
   const matched = objects.filter((object) => {
     const fileName = object.name.slice(root.length)
@@ -1195,8 +1230,8 @@ async function buildProMiddlewarePackage(
   }
 }
 
-async function listProMiddlewareCiVersions(client: OSS, name: string, arch: string) {
-  const root = await proMiddlewareRootForName(client, name)
+async function listProMiddlewareCiVersions(client: OSS, name: string, arch: string, roots = middlewareRootsForConfig()) {
+  const root = await proMiddlewareRootForName(client, name, roots)
   const objects = await listAllObjects(client, root)
   const versions = new Map<string, { hash: string; object: OssObject }>()
 
@@ -1228,10 +1263,11 @@ async function buildProMiddlewareCiPackage(
   arch: string,
   requestedHash: string,
   expireSeconds = downloadExpireSeconds,
+  roots = middlewareRootsForConfig(),
 ): Promise<PackageMarketDetail> {
-  const versions = await listProMiddlewareCiVersions(client, name, arch)
+  const versions = await listProMiddlewareCiVersions(client, name, arch, roots)
   const hash = normalizeString(requestedHash) || versions[0]?.hash || ''
-  const root = await proMiddlewareRootForName(client, name)
+  const root = await proMiddlewareRootForName(client, name, roots)
   const objects = hash ? await listAllObjects(client, `${root}${hash}/`) : []
   const matched = objects.filter((object) => {
     const fileName = object.name.slice(`${root}${hash}/`.length)
@@ -1538,11 +1574,8 @@ export async function listPackageMarketRules() {
   const yamlRules = parseRulesFile().map(publicRule)
   try {
     const client = ossClient()
-    const yamlMiddlewareNames = new Set(
-      yamlRules.filter((rule) => rule.category === 'middleware').map((rule) => rule.name),
-    )
-    const middlewareRules = await publicProMiddlewareRules(client, yamlMiddlewareNames)
-    return [...yamlRules, ...middlewareRules]
+    const discoveredRules = await publicDiscoveredPageKindRules(client, yamlRules)
+    return [...yamlRules, ...discoveredRules]
   } catch (error) {
     if (yamlRules.length > 0) return yamlRules
     throw error
@@ -1565,11 +1598,12 @@ export async function getPackageMarketDetail(params: {
   const includeAll = params.includeAll === true
   const appRuleId = resolvePackageMarketAppRuleId(params.packageId)
 
-  const middlewareName = proMiddlewareNameFromId(params.packageId)
+  const discovered = discoveredPageKindFromId(params.packageId)
+  const middlewareName = discovered?.name || proMiddlewareNameFromId(params.packageId)
   if (middlewareName) {
     return params.channel === 'ci'
-      ? buildProMiddlewareCiPackage(client, middlewareName, arch, params.ciVersion || '', expireSeconds)
-      : buildProMiddlewarePackage(client, middlewareName, arch, params.releaseVersion || '', expireSeconds)
+      ? buildProMiddlewareCiPackage(client, middlewareName, arch, params.ciVersion || '', expireSeconds, discovered?.roots)
+      : buildProMiddlewarePackage(client, middlewareName, arch, params.releaseVersion || '', expireSeconds, discovered?.roots)
   }
 
   const rule = parseRulesFile().find((item) => item.id === (appRuleId || params.packageId))
@@ -1620,9 +1654,10 @@ export async function listPackageMarketReleaseVersions(params: {
   const arch = normalizeString(params.arch || 'amd64').toLowerCase()
   const appRuleId = resolvePackageMarketAppRuleId(params.packageId)
 
-  const middlewareName = proMiddlewareNameFromId(params.packageId)
+  const discovered = discoveredPageKindFromId(params.packageId)
+  const middlewareName = discovered?.name || proMiddlewareNameFromId(params.packageId)
   if (middlewareName) {
-    return listProMiddlewareReleaseVersions(client, middlewareName, arch)
+    return listProMiddlewareReleaseVersions(client, middlewareName, arch, discovered?.roots)
   }
 
   const rule = parseRulesFile().find((item) => item.id === (appRuleId || params.packageId))
@@ -1647,9 +1682,10 @@ export async function listPackageMarketCiVersions(params: {
   const client = ossClient()
   const arch = normalizeString(params.arch || 'amd64').toLowerCase()
   const appRuleId = resolvePackageMarketAppRuleId(params.packageId)
-  const middlewareName = proMiddlewareNameFromId(params.packageId)
+  const discovered = discoveredPageKindFromId(params.packageId)
+  const middlewareName = discovered?.name || proMiddlewareNameFromId(params.packageId)
   if (middlewareName) {
-    return listProMiddlewareCiVersions(client, middlewareName, arch)
+    return listProMiddlewareCiVersions(client, middlewareName, arch, discovered?.roots)
   }
 
   const rule = parseRulesFile().find((item) => item.id === (appRuleId || params.packageId))
@@ -1664,7 +1700,7 @@ export async function listPackageMarketCiVersions(params: {
 
 export async function listPackageMarketCiBranches(params: { packageId: string }) {
   const client = ossClient()
-  if (proMiddlewareNameFromId(params.packageId)) return []
+  if (discoveredPageKindFromId(params.packageId) || proMiddlewareNameFromId(params.packageId)) return []
   const appRuleId = resolvePackageMarketAppRuleId(params.packageId)
   const rule = parseRulesFile().find((item) => item.id === (appRuleId || params.packageId))
   if (!rule) throw new Error(`unknown package: ${params.packageId}`)

@@ -1,4 +1,7 @@
-import type { OrganizationPackageMarketPolicy } from '../shared/organization-package-market'
+import type {
+  OrganizationPackageMarketPolicy,
+  OrganizationPackageMarketSelectionMode,
+} from '../shared/organization-package-market'
 import type { OrganizationPackageMarketCatalogRule } from './organization-types'
 
 export const organizationPackageMarketPageSizes = [12, 24, 48] as const
@@ -63,6 +66,37 @@ export function toggleOrganizationPackageMarketRule(
   return selectedIds.includes(ruleId)
     ? selectedIds.filter((id) => id !== ruleId)
     : [...selectedIds, ruleId]
+}
+
+export type OrganizationPackageMarketCategoryState = 'enabled' | 'disabled' | 'mixed'
+
+export function organizationPackageMarketCategoryState(
+  selectedIds: readonly string[],
+  categoryRuleIds: readonly string[],
+  mode: OrganizationPackageMarketSelectionMode,
+): OrganizationPackageMarketCategoryState {
+  if (categoryRuleIds.length === 0) return 'disabled'
+  const selected = new Set(selectedIds)
+  const selectedCount = categoryRuleIds.filter((id) => selected.has(id)).length
+  if (selectedCount > 0 && selectedCount < categoryRuleIds.length) return 'mixed'
+  const allSelected = selectedCount === categoryRuleIds.length
+  const enabled = mode === 'excluded' ? !allSelected : allSelected
+  return enabled ? 'enabled' : 'disabled'
+}
+
+export function toggleOrganizationPackageMarketCategory(
+  selectedIds: readonly string[],
+  categoryRuleIds: readonly string[],
+  mode: OrganizationPackageMarketSelectionMode,
+) {
+  const state = organizationPackageMarketCategoryState(selectedIds, categoryRuleIds, mode)
+  const shouldEnable = state !== 'enabled'
+  const nextIds = new Set(selectedIds)
+  categoryRuleIds.forEach((id) => {
+    if (mode === 'excluded' ? !shouldEnable : shouldEnable) nextIds.add(id)
+    else nextIds.delete(id)
+  })
+  return [...nextIds]
 }
 
 export function organizationPackageMarketPoliciesEqual(
