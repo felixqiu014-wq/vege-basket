@@ -5824,6 +5824,7 @@ type FeishuNotificationCandidate = {
   body: string
   bugActualResult?: string
   bugAssignmentKind?: TestBugAssignedEvent['assignmentKind']
+  bugId?: number
   bugEnvironment?: string
   bugExpectedResult?: string
   bugPriority?: Priority
@@ -5849,6 +5850,8 @@ type FeishuNotificationCandidate = {
   sourceId: number
   testPlanName?: string
   testSpaceName?: string
+  testSpaceVersionLabel?: string
+  testSubjectName?: string
   testActivityLabel?: string
   testBugStatus?: string
   testCommentContent?: string
@@ -5978,6 +5981,8 @@ type TestBugAssignedNotificationRow = {
   severity: string
   test_plan_name: string | null
   test_space_name: string
+  test_space_version_label: string | null
+  test_subject_name: string
   title: string
 }
 
@@ -6263,11 +6268,24 @@ function buildFeishuNotificationText(candidate: FeishuNotificationCandidate, tar
   }
 
   if (candidate.kind === 'test_bug_assigned') {
+    const bugNumber = candidate.bugId ?? candidate.sourceId
     const bugTitle = sanitizeFeishuMarkdownText(candidate.bugTitle || '未命名 Bug')
+    const testSpaceName = sanitizeFeishuMarkdownText(candidate.testSpaceName || '未命名测试空间')
+    const testSubjectName = sanitizeFeishuMarkdownText(candidate.testSubjectName || '未记录')
+    const testSpaceVersionLabel = sanitizeFeishuMarkdownText(candidate.testSpaceVersionLabel || '未指定')
+    const testPlanName = candidate.testPlanName
+      ? sanitizeFeishuMarkdownText(candidate.testPlanName)
+      : ''
+    const projectName = candidate.projectName
+      ? sanitizeFeishuMarkdownText(candidate.projectName)
+      : ''
+    const bugEnvironment = formatFeishuTodoDetailText(candidate.bugEnvironment, '未填写')
     const reproductionSteps = formatFeishuTodoDetailText(
       candidate.bugReproductionSteps,
       '未填写',
     )
+    const expectedResult = formatFeishuTodoDetailText(candidate.bugExpectedResult, '未填写')
+    const actualResult = formatFeishuTodoDetailText(candidate.bugActualResult, '未填写')
     const assigneeText = target.targetType === 'chat'
       ? buildFeishuAtText(candidate.recipientFeishuOpenId, candidate.recipientName)
       : sanitizeFeishuMarkdownText(candidate.recipientName || '未配置')
@@ -6282,19 +6300,29 @@ function buildFeishuNotificationText(candidate: FeishuNotificationCandidate, tar
     return [
       `【Veges 通知】${candidate.operatorName || '测试工程师'} ${assignmentVerb} Bug`,
       '',
+      `Bug 编号：BUG-${bugNumber}`,
       `Bug 标题：${bugTitle}`,
+      `负责人：${assigneeText}`,
+      `测试空间：${testSpaceName}`,
+      `测试对象：${testSubjectName}`,
+      `版本号：${testSpaceVersionLabel}`,
       `严重程度：${bugSeverityLabel(candidate.bugSeverity)}`,
       `优先级：${priorityLabel(candidate.bugPriority)}`,
-      `负责人：${assigneeText}`,
-      `测试空间：${candidate.testSpaceName ?? ''}`,
-      candidate.testPlanName ? `测试计划：${candidate.testPlanName}` : '',
-      candidate.projectName ? `关联项目：${candidate.projectName}` : '',
+      `环境：${bugEnvironment}`,
+      testPlanName ? `测试计划：${testPlanName}` : '',
+      projectName ? `关联项目：${projectName}` : '',
       '',
       '复现步骤',
       reproductionSteps,
+      '预期结果',
+      expectedResult,
+      '实际结果',
+      actualResult,
       transferReason ? '转移理由' : '',
       transferReason,
-      candidate.bugShareUrl ? `Bug 分享链接：${candidate.bugShareUrl}` : '',
+      candidate.bugShareUrl
+        ? `Bug 分享链接：${sanitizeFeishuMarkdownText(candidate.bugShareUrl)}`
+        : '',
     ].filter(Boolean).join('\n')
   }
 
@@ -6845,17 +6873,22 @@ function buildFeishuInteractiveCard(
   }
 
   if (candidate.kind === 'test_bug_assigned') {
+    const bugNumber = candidate.bugId ?? candidate.sourceId
     const bugTitle = sanitizeFeishuMarkdownText(candidate.bugTitle || '未命名 Bug')
+    const bugEnvironment = formatFeishuTodoDetailText(candidate.bugEnvironment, '未填写')
     const reproductionSteps = formatFeishuTodoDetailText(
       candidate.bugReproductionSteps,
       '未填写',
     )
+    const expectedResult = formatFeishuTodoDetailText(candidate.bugExpectedResult, '未填写')
     const actualResult = formatFeishuTodoDetailText(candidate.bugActualResult, '未填写')
     const transferReason = candidate.bugTransferReason
       ? formatFeishuTodoDetailText(candidate.bugTransferReason, '未填写')
       : ''
     const contextLines = [
       `**测试空间**\n${sanitizeFeishuMarkdownText(candidate.testSpaceName || '未命名测试空间')}`,
+      `**测试对象**\n${sanitizeFeishuMarkdownText(candidate.testSubjectName || '未记录')}`,
+      `**版本号**\n${sanitizeFeishuMarkdownText(candidate.testSpaceVersionLabel || '未指定')}`,
       candidate.testPlanName
         ? `**测试计划**\n${sanitizeFeishuMarkdownText(candidate.testPlanName)}`
         : '',
@@ -6892,11 +6925,17 @@ function buildFeishuInteractiveCard(
           tag: 'div',
           text: {
             content: [
+              '**Bug 编号**',
+              `BUG-${bugNumber}`,
+              '',
               '**Bug 标题**',
               bugTitle,
               '',
               '**复现步骤**',
               reproductionSteps,
+              '',
+              '**预期结果**',
+              expectedResult,
               '',
               '**实际结果**',
               actualResult,
@@ -6962,6 +7001,9 @@ function buildFeishuInteractiveCard(
                     content: [
                       '**优先级**',
                       sanitizeFeishuMarkdownText(priorityLabel(candidate.bugPriority)),
+                      '',
+                      '**环境**',
+                      bugEnvironment,
                     ].join('\n'),
                     tag: 'lark_md',
                   },
@@ -8218,6 +8260,8 @@ async function buildTestBugAssignedFeishuCandidate(event: TestBugAssignedEvent) 
            bug_share.token_encrypted as bug_share_token_encrypted,
            b.assignee_user_id,
            space.name as test_space_name,
+           space.version_label as test_space_version_label,
+           subject.name as test_subject_name,
            plan.name as test_plan_name,
            project.id as project_id,
            project.name as project_name,
@@ -8229,6 +8273,9 @@ async function buildTestBugAssignedFeishuCandidate(event: TestBugAssignedEvent) 
            operator_user.display_name as operator_display_name
     from test_bugs b
     join test_spaces space on space.id = b.test_space_id
+    join test_subjects subject
+      on subject.id = b.test_subject_id
+     and subject.test_space_id = b.test_space_id
     join users assignee on assignee.id = b.assignee_user_id
     left join users operator_user on operator_user.id = $3
     left join test_plans plan
@@ -8268,6 +8315,7 @@ async function buildTestBugAssignedFeishuCandidate(event: TestBugAssignedEvent) 
     body: `${operatorName} 将 Bug「${bugTitle}」指派给 ${recipientName}`,
     bugActualResult: bug.actual_result ? decryptText(bug.actual_result) : '',
     bugAssignmentKind: event.assignmentKind,
+    bugId: Number(bug.id),
     bugEnvironment: bug.environment ? decryptText(bug.environment) : '',
     bugExpectedResult: bug.expected_result ? decryptText(bug.expected_result) : '',
     bugPriority: bug.priority,
@@ -8289,6 +8337,10 @@ async function buildTestBugAssignedFeishuCandidate(event: TestBugAssignedEvent) 
     sourceId: Number(bug.id),
     testPlanName,
     testSpaceName,
+    testSpaceVersionLabel: bug.test_space_version_label
+      ? decryptText(bug.test_space_version_label)
+      : undefined,
+    testSubjectName: decryptText(bug.test_subject_name),
     title: '新的 Bug 指派',
     bugTitle,
     userId: Number(bug.assignee_user_id),

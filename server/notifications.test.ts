@@ -384,6 +384,71 @@ test('routes Bug assignments to the developer and only project-linked Bugs to pr
   assert.match(serverSource, /function bugShareLinkMarkdown\(candidate: FeishuNotificationCandidate\)[\s\S]*\*\*Bug 分享链接\*\*/u)
 })
 
+test('keeps assigned Bug Feishu text and card fields aligned with the Bug detail view', () => {
+  assert.match(serverSource, /space\.version_label as test_space_version_label/u)
+  assert.match(serverSource, /subject\.name as test_subject_name/u)
+  assert.match(serverSource, /bugId: Number\(bug\.id\)/u)
+  assert.match(serverSource, /testSubjectName: decryptText\(bug\.test_subject_name\)/u)
+  assert.match(serverSource, /testSpaceVersionLabel: bug\.test_space_version_label/u)
+
+  const textBuilderStart = serverSource.indexOf('function buildFeishuNotificationText(')
+  const textBugStart = serverSource.indexOf("if (candidate.kind === 'test_bug_assigned')", textBuilderStart)
+  const textBugEnd = serverSource.indexOf("candidate.kind === 'test_plan_assigned'", textBugStart)
+  assert.ok(textBugStart >= 0)
+  assert.ok(textBugEnd > textBugStart)
+  const textBugSource = serverSource.slice(textBugStart, textBugEnd)
+  for (const label of [
+    'Bug 编号',
+    'Bug 标题',
+    '负责人',
+    '测试空间',
+    '测试对象',
+    '版本号',
+    '严重程度',
+    '优先级',
+    '环境',
+    '复现步骤',
+    '预期结果',
+    '实际结果',
+  ]) {
+    assert.ok(textBugSource.includes(label), `text notification is missing ${label}`)
+  }
+  const textOrder = ['Bug 编号', 'Bug 标题', '负责人', '环境', '复现步骤', '预期结果', '实际结果']
+  let textPreviousIndex = -1
+  for (const label of textOrder) {
+    const index = textBugSource.indexOf(label)
+    assert.ok(index > textPreviousIndex, `text notification order changed at ${label}`)
+    textPreviousIndex = index
+  }
+  assert.match(textBugSource, /formatFeishuTodoDetailText\(candidate\.bugEnvironment, '未填写'\)/u)
+  assert.match(textBugSource, /formatFeishuTodoDetailText\(candidate\.bugExpectedResult, '未填写'\)/u)
+  assert.match(textBugSource, /formatFeishuTodoDetailText\(candidate\.bugActualResult, '未填写'\)/u)
+
+  const cardBuilderStart = serverSource.indexOf('function buildFeishuInteractiveCard(')
+  const cardBugStart = serverSource.indexOf("if (candidate.kind === 'test_bug_assigned')", cardBuilderStart)
+  const cardBugEnd = serverSource.indexOf("if (candidate.kind === 'package_event_assigned')", cardBugStart)
+  assert.ok(cardBugStart >= 0)
+  assert.ok(cardBugEnd > cardBugStart)
+  const cardBugSource = serverSource.slice(cardBugStart, cardBugEnd)
+  for (const label of [
+    '**Bug 编号**',
+    '**Bug 标题**',
+    '**测试对象**',
+    '**版本号**',
+    '**环境**',
+    '**复现步骤**',
+    '**预期结果**',
+    '**实际结果**',
+  ]) {
+    assert.ok(cardBugSource.includes(label), `interactive card is missing ${label}`)
+  }
+  assert.match(cardBugSource, /\*\*复现步骤\*\*[\s\S]*\*\*预期结果\*\*[\s\S]*\*\*实际结果\*\*/u)
+  assert.match(cardBugSource, /\*\*预期结果\*\*[\s\S]*\*\*实际结果\*\*/u)
+  assert.match(cardBugSource, /formatFeishuTodoDetailText\(candidate\.bugEnvironment, '未填写'\)/u)
+  assert.match(cardBugSource, /formatFeishuTodoDetailText\(candidate\.bugExpectedResult, '未填写'\)/u)
+  assert.match(cardBugSource, /formatFeishuTodoDetailText\(candidate\.bugActualResult, '未填写'\)/u)
+})
+
 test('transfers an assigned organization Bug atomically with an immutable collaboration record', () => {
   const routeStart = testWorkbenchSource.indexOf("router.post('/test-bugs/:bugId/assigned/transfer'")
   const routeEnd = testWorkbenchSource.indexOf("router.patch('/test-bugs/:bugId/assigned'", routeStart)
