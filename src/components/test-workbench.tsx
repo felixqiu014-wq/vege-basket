@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type ReactNode } from 'react'
 import {
   ArrowCounterClockwise,
   ArrowLeft,
@@ -82,6 +82,12 @@ import {
   type BugFilterJoin,
 } from './bug-filter'
 import { uploadWorkbenchAttachment } from '@/api'
+import {
+  clearBugCommentDraftIfMatches,
+  loadBugCommentDraft,
+  saveBugCommentDraft,
+  subscribeBugCommentDraftChanges,
+} from '@/bug-comment-drafts'
 import {
   addAssignedTestBugComment,
   addTestBugComment,
@@ -1284,6 +1290,7 @@ export function TestWorkbench({
                 bugs={filteredBugs}
                 busy={busy}
                 data={data}
+                draftOwnerUserId={currentUserId}
                 filterConditions={bugFilterConditions}
                 onFilterOpenChange={setBugFilterDialogOpen}
                 onFilterClear={() => setBugFilterConditions([])}
@@ -2156,10 +2163,11 @@ function PlanCaseDetailDialog({ onClose, planCase }: {
   )
 }
 
-function BugsView({ bugs, busy, data, filterConditions, onAssignee, onComment, onCreate, onDeleteComment, onEdit, onFilterClear, onFilterOpenChange, onSelect, onStatus, onTransferSpace, onUpdateComment, readOnly, searchQuery, onSearchQueryChange, selectedId }: {
+function BugsView({ bugs, busy, data, draftOwnerUserId, filterConditions, onAssignee, onComment, onCreate, onDeleteComment, onEdit, onFilterClear, onFilterOpenChange, onSelect, onStatus, onTransferSpace, onUpdateComment, readOnly, searchQuery, onSearchQueryChange, selectedId }: {
   bugs: TestBug[]
   busy: boolean
   data: TestWorkbenchData
+  draftOwnerUserId?: number
   filterConditions: BugFilterCondition[]
   onAssignee: (bug: TestBug, assigneeUserId?: number) => void
   onComment?: (bug: TestBug, content: string) => Promise<boolean>
@@ -2218,17 +2226,18 @@ function BugsView({ bugs, busy, data, filterConditions, onAssignee, onComment, o
             {bugs.length ? bugs.map((bug) => <button key={bug.id} className={bug.id === selectedId ? 'active' : ''} onClick={() => onSelect(bug.id)}><div><code>BUG-{bug.id}</code><Badge className={`test-bug-status ${bug.status}`} variant="outline">{bugStatusLabel[bug.status]}</Badge></div><strong>{bug.title}</strong><small>{formatTimestamp(bug.updatedAt)} · <UserName departedUserIds={data.departedUserIds} name={bug.assigneeName || '未分配'} userId={bug.assigneeUserId} />{bug.assigneeTransferSource === 'offboarding' ? '（离职转移）' : null}</small></button>) : <div className="test-list-empty">{filterConditions.length > 0 || searchQuery.trim() ? <><FunnelSimple size={24} /><span>没有符合当前条件的 Bug。</span>{filterConditions.length > 0 ? <Button type="button" variant="outline" onClick={onFilterClear}>清除筛选</Button> : null}{searchQuery.trim() ? <Button type="button" variant="outline" onClick={() => onSearchQueryChange('')}>清除搜索</Button> : null}</> : '当前测试对象还没有 Bug。'}</div>}
         </div>
         <div className="test-record-detail">
-          {selected ? <BugDetail bug={selected} busy={busy} departedUserIds={data.departedUserIds} readOnly={readOnly} users={data.users} onAssignee={onAssignee} onComment={readOnly ? undefined : onComment} onDeleteComment={readOnly ? undefined : onDeleteComment} onEdit={onEdit} onStatus={onStatus} onTransferSpace={onTransferSpace} onUpdateComment={readOnly ? undefined : onUpdateComment} /> : <div className="test-detail-empty"><Bug size={28} /><p>选择一个 Bug 查看和流转。</p></div>}
+          {selected ? <BugDetail bug={selected} busy={busy} departedUserIds={data.departedUserIds} draftOwnerUserId={draftOwnerUserId} readOnly={readOnly} users={data.users} onAssignee={onAssignee} onComment={readOnly ? undefined : onComment} onDeleteComment={readOnly ? undefined : onDeleteComment} onEdit={onEdit} onStatus={onStatus} onTransferSpace={onTransferSpace} onUpdateComment={readOnly ? undefined : onUpdateComment} /> : <div className="test-detail-empty"><Bug size={28} /><p>选择一个 Bug 查看和流转。</p></div>}
         </div>
       </div>
     </div>
   )
 }
 
-function BugDetail({ bug, busy, departedUserIds, onAssignee, onComment, onDeleteComment, onEdit, onStatus, onTransferSpace, onUpdateComment, readOnly, users }: {
+function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, onComment, onDeleteComment, onEdit, onStatus, onTransferSpace, onUpdateComment, readOnly, users }: {
   bug: TestBug
   busy: boolean
   departedUserIds: readonly number[]
+  draftOwnerUserId?: number
   onAssignee: (bug: TestBug, assigneeUserId?: number) => void
   onComment?: (bug: TestBug, content: string) => Promise<boolean>
   onDeleteComment?: (bug: TestBug, comment: TestBugComment) => Promise<boolean>
@@ -2276,6 +2285,7 @@ function BugDetail({ bug, busy, departedUserIds, onAssignee, onComment, onDelete
       bug={bug}
       busy={busy}
       departedUserIds={departedUserIds}
+      draftOwnerUserId={draftOwnerUserId}
       placeholder="补充验证信息或处理记录，支持粘贴、拖入或上传图片和视频。"
       onComment={onComment}
       onDeleteComment={onDeleteComment}
@@ -2413,24 +2423,180 @@ function BugTimelineDialog({ bug, departedUserIds, onOpenChange, open }: {
   )
 }
 
-function BugCommentsSection({ bug, busy, currentUserId, departedUserIds = [], mentionMembers, onComment, onDeleteComment, onUpdateComment, placeholder }: {
+type BugCommentComposerDraft = {
+  context: string
+  publishedDraftClearFailed: boolean
+  storageFailed: boolean
+  value: string
+}
+
+function getBugCommentDraftContext(userId: number | undefined, bugId: number) {
+  return `${userId ?? 'anonymous'}:${bugId}`
+}
+
+function didBugCommentDraftStorageFail(userId: number | undefined, result: { ok: boolean }) {
+  return typeof userId === 'number' && Number.isSafeInteger(userId) && userId > 0 && !result.ok
+}
+
+function BugCommentsSection({ bug, busy, currentUserId, departedUserIds = [], draftOwnerUserId, mentionMembers, onComment, onDeleteComment, onUpdateComment, placeholder }: {
   bug: TestBug
   busy: boolean
   currentUserId?: number
   departedUserIds?: readonly number[]
+  draftOwnerUserId?: number
   mentionMembers?: MentionMember[]
   onComment?: (bug: TestBug, content: string) => Promise<boolean>
   onDeleteComment?: (bug: TestBug, comment: TestBugComment) => Promise<boolean>
   onUpdateComment?: (bug: TestBug, comment: TestBugComment, content: string) => Promise<boolean>
   placeholder: string
 }) {
-  const [comment, setComment] = useState('')
+  const draftContext = getBugCommentDraftContext(draftOwnerUserId, bug.id)
+  const draftMemoryRef = useRef(new Map<string, string>())
+  const draftRevisionRef = useRef(new Map<string, number>())
+  const failedDraftContextsRef = useRef(new Set<string>())
+  const publishedDraftClearFailedContextsRef = useRef(new Set<string>())
+  const previousDraftOwnerUserIdRef = useRef(draftOwnerUserId)
+  const mountedRef = useRef(false)
+  const [composerDraft, setComposerDraft] = useState<BugCommentComposerDraft>({
+    context: '',
+    publishedDraftClearFailed: false,
+    storageFailed: false,
+    value: '',
+  })
   const [uploading, setUploading] = useState(false)
+  const comment = composerDraft.context === draftContext ? composerDraft.value : ''
+  const publishedDraftClearFailed = composerDraft.context === draftContext && composerDraft.publishedDraftClearFailed
+  const draftStorageFailed = composerDraft.context === draftContext && composerDraft.storageFailed
 
   useEffect(() => {
-    setComment('')
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (previousDraftOwnerUserIdRef.current !== draftOwnerUserId) {
+      draftMemoryRef.current.clear()
+      draftRevisionRef.current.clear()
+      failedDraftContextsRef.current.clear()
+      publishedDraftClearFailedContextsRef.current.clear()
+      previousDraftOwnerUserIdRef.current = draftOwnerUserId
+    }
+
+    const cachedDraft = draftMemoryRef.current.get(draftContext)
+    if (cachedDraft !== undefined) {
+      if (!draftRevisionRef.current.has(draftContext)) draftRevisionRef.current.set(draftContext, 0)
+      setComposerDraft({
+        context: draftContext,
+        publishedDraftClearFailed: publishedDraftClearFailedContextsRef.current.has(draftContext),
+        storageFailed: failedDraftContextsRef.current.has(draftContext),
+        value: cachedDraft,
+      })
+    } else {
+      const loaded = loadBugCommentDraft(draftOwnerUserId, bug.id)
+      draftMemoryRef.current.set(draftContext, loaded.value)
+      draftRevisionRef.current.set(draftContext, loaded.revision)
+      const storageFailed = didBugCommentDraftStorageFail(draftOwnerUserId, loaded)
+      if (storageFailed) failedDraftContextsRef.current.add(draftContext)
+      else failedDraftContextsRef.current.delete(draftContext)
+      setComposerDraft({
+        context: draftContext,
+        publishedDraftClearFailed: false,
+        storageFailed,
+        value: loaded.value,
+      })
+    }
     setUploading(false)
-  }, [bug.id])
+  }, [bug.id, draftContext, draftOwnerUserId])
+
+  useEffect(() => subscribeBugCommentDraftChanges((changedUserId, changedBugId) => {
+    if (changedUserId !== draftOwnerUserId || changedBugId !== bug.id) return
+    const loaded = loadBugCommentDraft(draftOwnerUserId, bug.id)
+    draftMemoryRef.current.set(draftContext, loaded.value)
+    draftRevisionRef.current.set(draftContext, loaded.revision)
+    const storageFailed = didBugCommentDraftStorageFail(draftOwnerUserId, loaded)
+    if (storageFailed) failedDraftContextsRef.current.add(draftContext)
+    else failedDraftContextsRef.current.delete(draftContext)
+    publishedDraftClearFailedContextsRef.current.delete(draftContext)
+    if (!mountedRef.current) return
+    setComposerDraft((current) => current.context === draftContext
+      ? {
+          context: draftContext,
+          publishedDraftClearFailed: false,
+          storageFailed,
+          value: loaded.value,
+        }
+      : current)
+  }), [bug.id, draftContext, draftOwnerUserId])
+
+  function updateCommentDraft(nextValue: string) {
+    const nextRevision = (draftRevisionRef.current.get(draftContext) ?? 0) + 1
+    const saved = saveBugCommentDraft(draftOwnerUserId, bug.id, nextValue, nextRevision)
+    draftMemoryRef.current.set(draftContext, saved.value)
+    draftRevisionRef.current.set(draftContext, saved.revision)
+    if (didBugCommentDraftStorageFail(draftOwnerUserId, saved)) failedDraftContextsRef.current.add(draftContext)
+    else failedDraftContextsRef.current.delete(draftContext)
+    publishedDraftClearFailedContextsRef.current.delete(draftContext)
+
+    setComposerDraft((current) => current.context === draftContext
+      ? {
+          context: draftContext,
+          publishedDraftClearFailed: false,
+          storageFailed: failedDraftContextsRef.current.has(draftContext),
+          value: nextValue,
+        }
+      : current)
+  }
+
+  async function submitComment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const submittedContent = comment
+    const submittedContext = draftContext
+    const submittedBug = bug
+    const submittedUserId = draftOwnerUserId
+    const submittedRevision = draftRevisionRef.current.get(submittedContext) ?? 0
+    if (!submittedContent.trim() || !onComment) return
+    if (!(await onComment(submittedBug, submittedContent))) return
+    if (draftRevisionRef.current.get(submittedContext) !== submittedRevision) return
+
+    const cleared = clearBugCommentDraftIfMatches(
+      submittedUserId,
+      submittedBug.id,
+      submittedContent,
+      submittedRevision,
+    )
+
+    failedDraftContextsRef.current.delete(submittedContext)
+    if (cleared.status === 'kept') {
+      draftMemoryRef.current.set(submittedContext, cleared.value)
+      draftRevisionRef.current.set(submittedContext, cleared.revision)
+      publishedDraftClearFailedContextsRef.current.delete(submittedContext)
+      if (mountedRef.current) setComposerDraft((current) => current.context === submittedContext && current.value === submittedContent
+        ? {
+            context: submittedContext,
+            publishedDraftClearFailed: false,
+            storageFailed: false,
+            value: cleared.value,
+          }
+        : current)
+      return
+    }
+
+    const clearFailed = didBugCommentDraftStorageFail(submittedUserId, cleared)
+    draftMemoryRef.current.set(submittedContext, '')
+    draftRevisionRef.current.set(submittedContext, submittedRevision + 1)
+    if (clearFailed) publishedDraftClearFailedContextsRef.current.add(submittedContext)
+    else publishedDraftClearFailedContextsRef.current.delete(submittedContext)
+    if (mountedRef.current) setComposerDraft((current) => current.context === submittedContext && current.value === submittedContent
+      ? {
+          context: submittedContext,
+          publishedDraftClearFailed: clearFailed,
+          storageFailed: false,
+          value: '',
+        }
+      : current)
+  }
 
   return (
     <section className="test-comments">
@@ -2449,19 +2615,19 @@ function BugCommentsSection({ bug, busy, currentUserId, departedUserIds = [], me
       ))}
       {onComment ? <form
         className="test-comment-composer"
-        onSubmit={async (event) => {
-          event.preventDefault()
-          if (comment.trim() && await onComment(bug, comment)) setComment('')
-        }}
+        onSubmit={submitComment}
       >
         <BugEvidenceEditor
+          key={draftContext}
           label="添加评论"
           mentionMembers={mentionMembers}
           value={comment}
           placeholder={placeholder}
-          onChange={setComment}
+          onChange={updateCommentDraft}
           onUploadingChange={setUploading}
         />
+        {publishedDraftClearFailed ? <p aria-live="polite" className="test-form-error" role="status">评论已发布，但浏览器草稿未能清除；刷新后如再次出现，请勿重复提交。</p> : null}
+        {!publishedDraftClearFailed && draftStorageFailed ? <p aria-live="polite" className="test-form-error" role="status">评论草稿无法保存到浏览器，切换页面或刷新前请先复制内容。</p> : null}
         <Button disabled={busy || uploading || !comment.trim()}>{uploading ? '附件上传中...' : '添加评论'}</Button>
       </form> : null}
     </section>
@@ -2663,8 +2829,16 @@ function BugEvidenceEditor({ label, mentionMembers, onChange, onUploadingChange,
   const [uploadingAttachmentSrcs, setUploadingAttachmentSrcs] = useState<string[]>([])
   const latestValueRef = useRef(value)
   const lastSerializedValueRef = useRef<string | null>(null)
+  const mountedRef = useRef(false)
   const previewAttachment = previewIndex == null ? null : attachments[previewIndex] ?? null
   const uploadingSrcSet = useMemo(() => new Set(uploadingAttachmentSrcs), [uploadingAttachmentSrcs])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     latestValueRef.current = value
@@ -2686,11 +2860,15 @@ function BugEvidenceEditor({ label, mentionMembers, onChange, onUploadingChange,
   function commitValue(nextValue: string) {
     latestValueRef.current = nextValue
     lastSerializedValueRef.current = nextValue
-    onChange(nextValue)
+    if (mountedRef.current) {
+      onChange(nextValue)
+      return true
+    }
+    return false
   }
 
   function updateEvidence(nextText: string, nextAttachments: BugEvidenceAttachment[]) {
-    commitValue(serializeBugEvidenceContent(nextText, nextAttachments))
+    return commitValue(serializeBugEvidenceContent(nextText, nextAttachments))
   }
 
   async function handleFiles(files: File[]) {
@@ -2717,6 +2895,7 @@ function BugEvidenceEditor({ label, mentionMembers, onChange, onUploadingChange,
 
     try {
       const uploads = await Promise.all(supportedFiles.map(uploadWorkbenchAttachment))
+      if (!mountedRef.current) return
       const uploadedAttachmentsByPendingSrc = new Map(
         pendingAttachments.map((pendingAttachment, index) => [
           pendingAttachment.src,
@@ -2734,17 +2913,22 @@ function BugEvidenceEditor({ label, mentionMembers, onChange, onUploadingChange,
       })
       updateEvidence(latestContent.text, nextAttachments)
     } catch (error) {
+      if (!mountedRef.current) return
       const latestContent = parseBugEvidenceContent(latestValueRef.current)
-      updateEvidence(
+      const changed = updateEvidence(
         latestContent.text,
         latestContent.attachments.filter((attachment) => !pendingSrcSet.has(attachment.src)),
       )
       console.error('Bug evidence attachment upload failed', error)
-      window.alert(error instanceof Error && error.message
-        ? `附件上传失败：${error.message}`
-        : '附件上传失败，请稍后重试。')
+      if (mountedRef.current && changed) {
+        window.alert(error instanceof Error && error.message
+          ? `附件上传失败：${error.message}`
+          : '附件上传失败，请稍后重试。')
+      }
     } finally {
-      setUploadingAttachmentSrcs((current) => current.filter((src) => !pendingSrcSet.has(src)))
+      if (mountedRef.current) {
+        setUploadingAttachmentSrcs((current) => current.filter((src) => !pendingSrcSet.has(src)))
+      }
       pendingAttachments.forEach((attachment) => URL.revokeObjectURL(attachment.src))
     }
   }
@@ -4744,6 +4928,7 @@ export function AssignedTestBugs({
                   busy={busy}
                   currentUserId={currentUserId}
                   departedUserIds={departedUserIds}
+                  draftOwnerUserId={currentUserId}
                   mentionMembers={selected.organizationMembers ?? mentionMembers}
                   placeholder="说明修复内容或提交版本，支持粘贴、拖入或上传图片和视频。"
                   onComment={selected.canComment
