@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   filterOrganizationPackageMarketRules,
   organizationPackageMarketCategoryState,
+  organizationPackageMarketPageSizes,
   organizationPackageMarketPoliciesEqual,
   paginateOrganizationPackageMarketRules,
   toggleOrganizationPackageMarketCategory,
@@ -107,6 +108,7 @@ test('package market catalog filters one shared range by category, query, and se
 })
 
 test('package market pagination clamps the requested page and keeps a stable page size', () => {
+  assert.deepEqual(organizationPackageMarketPageSizes, [5, 10, 15])
   const page = paginateOrganizationPackageMarketRules(['a', 'b', 'c'], 4, 2)
   assert.deepEqual(page, {
     items: ['c'],
@@ -115,12 +117,19 @@ test('package market pagination clamps the requested page and keeps a stable pag
     totalItems: 3,
     totalPages: 2,
   })
-  assert.equal(paginateOrganizationPackageMarketRules(['a'], 1, 0).pageSize, 12)
+  assert.equal(paginateOrganizationPackageMarketRules(['a'], 1, 0).pageSize, 5)
 })
 
 test('component channel settings use their own paged top-level component list', () => {
+  assert.match(
+    panelSource,
+    /const \[pageSize, setPageSize\] = useState<OrganizationPackageMarketPageSize>\(organizationPackageMarketPageSizes\[0\]\)/u,
+  )
   assert.match(panelSource, /const \[componentPage, setComponentPage\] = useState\(1\)/u)
-  assert.match(panelSource, /const \[componentPageSize, setComponentPageSize\] = useState<OrganizationPackageMarketPageSize>\(12\)/u)
+  assert.match(
+    panelSource,
+    /const \[componentPageSize, setComponentPageSize\] = useState<OrganizationPackageMarketPageSize>\(organizationPackageMarketPageSizes\[0\]\)/u,
+  )
   assert.match(
     panelSource,
     /paginateOrganizationPackageMarketRules\(\s*componentTableRules,\s*componentPage,\s*componentPageSize,?\s*\)/u,

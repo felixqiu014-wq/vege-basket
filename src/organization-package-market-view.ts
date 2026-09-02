@@ -4,7 +4,7 @@ import type {
 } from '../shared/organization-package-market'
 import type { OrganizationPackageMarketCatalogRule } from './organization-types'
 
-export const organizationPackageMarketPageSizes = [12, 24, 48] as const
+export const organizationPackageMarketPageSizes = [5, 10, 15] as const
 export type OrganizationPackageMarketPageSize = (typeof organizationPackageMarketPageSizes)[number]
 export type OrganizationPackageMarketCategory = 'all' | OrganizationPackageMarketCatalogRule['category']
 

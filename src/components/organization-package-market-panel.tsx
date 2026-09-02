@@ -141,9 +141,9 @@ export function OrganizationPackageMarketPanel({
   const [onlyConfigured, setOnlyConfigured] = useState(false)
   const [onlyClosedComponents, setOnlyClosedComponents] = useState(false)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<OrganizationPackageMarketPageSize>(12)
+  const [pageSize, setPageSize] = useState<OrganizationPackageMarketPageSize>(organizationPackageMarketPageSizes[0])
   const [componentPage, setComponentPage] = useState(1)
-  const [componentPageSize, setComponentPageSize] = useState<OrganizationPackageMarketPageSize>(12)
+  const [componentPageSize, setComponentPageSize] = useState<OrganizationPackageMarketPageSize>(organizationPackageMarketPageSizes[0])
 
   const selectableRules = useMemo(
     () => selectableOrganizationPackageMarketRules(catalog),
