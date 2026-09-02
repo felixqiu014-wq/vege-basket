@@ -142,6 +142,8 @@ export function OrganizationPackageMarketPanel({
   const [onlyClosedComponents, setOnlyClosedComponents] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<OrganizationPackageMarketPageSize>(12)
+  const [componentPage, setComponentPage] = useState(1)
+  const [componentPageSize, setComponentPageSize] = useState<OrganizationPackageMarketPageSize>(12)
 
   const selectableRules = useMemo(
     () => selectableOrganizationPackageMarketRules(catalog),
@@ -239,6 +241,11 @@ export function OrganizationPackageMarketPanel({
   const componentTableRules = componentRules.filter((rule) => (
     !onlyClosedComponents || ruleStatus(rule) === 'closed'
   ))
+  const pagedComponentRules = paginateOrganizationPackageMarketRules(
+    componentTableRules,
+    componentPage,
+    componentPageSize,
+  )
 
   useEffect(() => {
     setPage(1)
@@ -247,6 +254,14 @@ export function OrganizationPackageMarketPanel({
   useEffect(() => {
     if (page !== pagedRules.page) setPage(pagedRules.page)
   }, [page, pagedRules.page])
+
+  useEffect(() => {
+    setComponentPage(1)
+  }, [category, componentPageSize, onlyClosedComponents, query])
+
+  useEffect(() => {
+    if (componentPage !== pagedComponentRules.page) setComponentPage(pagedComponentRules.page)
+  }, [componentPage, pagedComponentRules.page])
 
   function updateSelection(
     patch: Partial<OrganizationPackageMarketPolicy['selection']>,
@@ -769,7 +784,7 @@ export function OrganizationPackageMarketPanel({
               </Button>
             </div>
             <div className="organization-package-market-component-summary">
-              <span>共 {componentTableRules.length} 个顶级组件</span>
+              <span>共 {pagedComponentRules.totalItems} 个顶级组件</span>
               <span><i className="available" />可用 <i className="closed" />已关闭 <i className="dependency" />依赖</span>
             </div>
             <div className="organization-package-market-component-table" aria-busy={catalogLoading}>
@@ -781,7 +796,7 @@ export function OrganizationPackageMarketPanel({
                   <CircleNotch className="organization-package-market-spinner" size={20} />
                   <span>正在读取安装包目录...</span>
                 </div>
-              ) : componentTableRules.length > 0 ? componentTableRules.map((rule) => {
+              ) : pagedComponentRules.items.length > 0 ? pagedComponentRules.items.map((rule) => {
                 const dependencies = dependencyRulesByParent.get(rule.canonicalId) ?? []
                 const status = ruleStatus(rule)
                 const statusLabel = status === 'available' ? '可用' : status === 'partial' ? '部分可用' : '已关闭'
@@ -882,6 +897,49 @@ export function OrganizationPackageMarketPanel({
                 </div>
               )}
             </div>
+            {!catalogLoading && pagedComponentRules.totalItems > 0 ? (
+              <div className="organization-package-market-pagination">
+                <div className="organization-package-market-page-size">
+                  <span>每页</span>
+                  <Select
+                    value={String(componentPageSize)}
+                    onValueChange={(value) => setComponentPageSize(Number(value) as OrganizationPackageMarketPageSize)}
+                  >
+                    <SelectTrigger aria-label="选择每页组件数量"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {organizationPackageMarketPageSizes.map((size) => (
+                        <SelectItem key={size} value={String(size)}>{size} 条</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="organization-package-market-page-controls">
+                  <span>第 {pagedComponentRules.page} / {pagedComponentRules.totalPages} 页</span>
+                  <Button
+                    aria-label="组件上一页"
+                    disabled={pagedComponentRules.page <= 1}
+                    size="icon"
+                    title="组件上一页"
+                    type="button"
+                    variant="outline"
+                    onClick={() => setComponentPage((current) => Math.max(1, current - 1))}
+                  >
+                    <CaretLeft aria-hidden="true" size={16} />
+                  </Button>
+                  <Button
+                    aria-label="组件下一页"
+                    disabled={pagedComponentRules.page >= pagedComponentRules.totalPages}
+                    size="icon"
+                    title="组件下一页"
+                    type="button"
+                    variant="outline"
+                    onClick={() => setComponentPage((current) => Math.min(pagedComponentRules.totalPages, current + 1))}
+                  >
+                    <CaretRight aria-hidden="true" size={16} />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </section>
         </section>
       </div>

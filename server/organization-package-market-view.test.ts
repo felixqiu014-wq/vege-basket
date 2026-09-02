@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   filterOrganizationPackageMarketRules,
@@ -10,6 +11,11 @@ import {
 } from '../src/organization-package-market-view.ts'
 import type { OrganizationPackageMarketCatalogRule } from '../src/organization-types.ts'
 import { defaultOrganizationPackageMarketPolicy } from '../shared/organization-package-market.ts'
+
+const panelSource = readFileSync(
+  new URL('../src/components/organization-package-market-panel.tsx', import.meta.url),
+  'utf8',
+)
 
 const rules: OrganizationPackageMarketCatalogRule[] = [
   {
@@ -110,6 +116,18 @@ test('package market pagination clamps the requested page and keeps a stable pag
     totalPages: 2,
   })
   assert.equal(paginateOrganizationPackageMarketRules(['a'], 1, 0).pageSize, 12)
+})
+
+test('component channel settings use their own paged top-level component list', () => {
+  assert.match(panelSource, /const \[componentPage, setComponentPage\] = useState\(1\)/u)
+  assert.match(panelSource, /const \[componentPageSize, setComponentPageSize\] = useState<OrganizationPackageMarketPageSize>\(12\)/u)
+  assert.match(
+    panelSource,
+    /paginateOrganizationPackageMarketRules\(\s*componentTableRules,\s*componentPage,\s*componentPageSize,?\s*\)/u,
+  )
+  assert.match(panelSource, /pagedComponentRules\.items\.map\(\(rule\)/u)
+  assert.match(panelSource, /aria-label="组件上一页"/u)
+  assert.match(panelSource, /aria-label="组件下一页"/u)
 })
 
 test('package market selection toggles one stable rule id at a time', () => {

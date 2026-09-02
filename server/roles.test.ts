@@ -9,6 +9,10 @@ import {
 } from './roles.ts'
 
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const roleSelectionSource = readFileSync(
+  new URL('../src/components/user-role-dialogs.tsx', import.meta.url),
+  'utf8',
+).split('export function UserRoleManagementDialog')[0]
 
 test('organization administrator is an additive capability, not a switchable role', () => {
   assert.equal(isSwitchableUserRole('organization_admin'), false)
@@ -16,6 +20,12 @@ test('organization administrator is an additive capability, not a switchable rol
     getSwitchableUserRoles(['organization_admin']),
     ['developer', 'tester'],
   )
+})
+
+test('login identity selection contains only switchable business personas', () => {
+  assert.match(roleSelectionSource, /getSwitchableUserRoles\(user\.roles\)\.map/u)
+  assert.doesNotMatch(roleSelectionSource, /organization_admin/u)
+  assert.doesNotMatch(roleSelectionSource, /onOpenOrganization/u)
 })
 
 test('organization administrator can assume every business role', () => {

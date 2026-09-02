@@ -4769,10 +4769,6 @@ ${packageTimelineText}`
       busy={roleSelectionBusy}
       open={roleSelectionOpen}
       user={authUser}
-      onOpenOrganization={() => {
-        setRoleSelectionOpen(false)
-        setView('organization')
-      }}
       onSelect={(role) => void changeActiveUserRole(role)}
     />
   ) : null
