@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   filterOrganizationPackageMarketRules,
+  organizationPackageMarketCategoryState,
   organizationPackageMarketPageSizes,
   organizationPackageMarketPoliciesEqual,
   paginateOrganizationPackageMarketRules,
+  setOrganizationPackageMarketCategoryEnabled,
   toggleOrganizationPackageMarketRule,
 } from '../src/organization-package-market-view.ts'
 import type { OrganizationPackageMarketCatalogRule } from '../src/organization-types.ts'
@@ -137,6 +139,33 @@ test('package market uses one component workbench for filtering, selection, and 
 test('package market selection toggles one stable rule id at a time', () => {
   assert.deepEqual(toggleOrganizationPackageMarketRule([], 'terminal'), ['terminal'])
   assert.deepEqual(toggleOrganizationPackageMarketRule(['terminal', 'registry'], 'terminal'), ['registry'])
+})
+
+test('category state and category switch preserve each selection mode semantics', () => {
+  assert.equal(organizationPackageMarketCategoryState([], ['terminal', 'base-oss'], 'all'), 'enabled')
+  assert.equal(organizationPackageMarketCategoryState(['terminal'], ['terminal', 'base-oss'], 'selected'), 'mixed')
+  assert.equal(organizationPackageMarketCategoryState(['terminal', 'base-oss'], ['terminal', 'base-oss'], 'excluded'), 'disabled')
+
+  assert.deepEqual(
+    setOrganizationPackageMarketCategoryEnabled({ mode: 'all', ruleIds: [] }, ['terminal', 'base-oss'], false),
+    { mode: 'excluded', ruleIds: ['terminal', 'base-oss'] },
+  )
+  assert.deepEqual(
+    setOrganizationPackageMarketCategoryEnabled({ mode: 'selected', ruleIds: ['registry'] }, ['terminal', 'base-oss'], true),
+    { mode: 'selected', ruleIds: ['registry', 'terminal', 'base-oss'] },
+  )
+  assert.deepEqual(
+    setOrganizationPackageMarketCategoryEnabled({ mode: 'excluded', ruleIds: ['registry', 'terminal'] }, ['terminal', 'base-oss'], true),
+    { mode: 'excluded', ruleIds: ['registry'] },
+  )
+})
+
+test('component workbench exposes a category switch and hides member-range rows in all mode', () => {
+  assert.match(panelSource, /organization-package-market-category-toggle/u)
+  assert.match(panelSource, /setCurrentCategoryEnabled/u)
+  assert.match(panelSource, /const showMemberRangeColumn = policy\?\.selection\.mode !== 'all'/u)
+  assert.match(panelSource, /without-member-range/u)
+  assert.match(panelSource, /成员范围：全部组件可见/u)
 })
 
 test('package market policy equality ignores selection ordering', () => {

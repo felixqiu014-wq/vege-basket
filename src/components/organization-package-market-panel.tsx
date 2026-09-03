@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowCounterClockwise,
   CaretLeft,
@@ -39,10 +39,12 @@ import {
 } from './ui/select'
 import {
   filterOrganizationPackageMarketRules,
+  organizationPackageMarketCategoryState,
   organizationPackageMarketPageSizes,
   organizationPackageMarketPoliciesEqual,
   paginateOrganizationPackageMarketRules,
   selectableOrganizationPackageMarketRules,
+  setOrganizationPackageMarketCategoryEnabled,
   toggleOrganizationPackageMarketRule,
   type OrganizationPackageMarketCategory,
   type OrganizationPackageMarketPageSize,
@@ -98,20 +100,29 @@ function Toggle({
   checked,
   disabled,
   label,
+  mixed,
   onChange,
 }: {
   checked: boolean
   disabled?: boolean
   label: string
+  mixed?: boolean
   onChange: (checked: boolean) => void
 }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (inputRef.current) inputRef.current.indeterminate = Boolean(mixed)
+  }, [mixed])
+
   return (
     <label className="organization-package-market-toggle">
       <input
         aria-label={label}
-        aria-checked={checked}
         checked={checked}
+        data-mixed={mixed ? 'true' : undefined}
         disabled={disabled}
+        ref={inputRef}
         type="checkbox"
         onChange={(event) => onChange(event.target.checked)}
       />
@@ -146,15 +157,29 @@ export function OrganizationPackageMarketPanel({
   const effectivePolicy = policy ?? defaultOrganizationPackageMarketPolicy
   const configuredRuleIdSet = useMemo(() => new Set(configuredRuleIds), [configuredRuleIds])
   const configuredCount = selectableRules.filter((rule) => configuredRuleIdSet.has(rule.canonicalId)).length
-  const categoryOptions = useMemo(() => {
-    const groups = new Map<string, string>()
+  const categoryRows = useMemo(() => {
+    const groups = new Map<string, { code: string; label: string; ruleIds: string[] }>()
     selectableRules.forEach((rule) => {
       const code = packageMarketCategoryCode(rule)
-      if (!groups.has(code)) groups.set(code, packageMarketCategoryLabel(rule))
+      const existing = groups.get(code)
+      if (existing) {
+        existing.ruleIds.push(rule.canonicalId)
+      } else {
+        groups.set(code, {
+          code,
+          label: packageMarketCategoryLabel(rule),
+          ruleIds: [rule.canonicalId],
+        })
+      }
     })
-    return [...groups].map(([code, label]) => ({ code, label }))
+    return [...groups.values()]
   }, [selectableRules])
+  const categoryOptions = categoryRows.map(({ code, label }) => ({ code, label }))
+  const currentCategory = category === 'all'
+    ? null
+    : categoryRows.find((candidate) => candidate.code === category) ?? null
   const isExclusionMode = policy?.selection.mode === 'excluded'
+  const showMemberRangeColumn = policy?.selection.mode !== 'all'
   const configuredLabel = isExclusionMode ? '已禁止' : '已选'
   const ruleActionLabel = isExclusionMode ? '禁止' : '选择'
   const componentRules = useMemo(() => filterOrganizationPackageMarketRules(catalog, {
@@ -204,6 +229,25 @@ export function OrganizationPackageMarketPanel({
   const wouldExcludeEverySelectable = isExclusionMode && selectableRules.length > 0 && selectableRules.every((rule) => (
     configuredRuleIdSet.has(rule.canonicalId) || filteredRuleIdSet.has(rule.canonicalId)
   ))
+  const currentCategoryState = currentCategory
+    ? organizationPackageMarketCategoryState(
+      configuredRuleIds,
+      currentCategory.ruleIds,
+      policy?.selection.mode ?? 'all',
+    )
+    : null
+  const currentCategoryEnabled = currentCategoryState === 'enabled'
+  const currentCategoryIsMixed = currentCategoryState === 'mixed'
+  const currentCategoryRuleIdSet = new Set(currentCategory?.ruleIds ?? [])
+  const disablingCurrentCategoryWouldHideEverything = Boolean(
+    currentCategory
+      && currentCategoryEnabled
+      && (policy?.selection.mode === 'all' || isExclusionMode)
+      && selectableRules.length > 0
+      && selectableRules.every((rule) => (
+        configuredRuleIdSet.has(rule.canonicalId) || currentCategoryRuleIdSet.has(rule.canonicalId)
+      )),
+  )
   const hasFilters = Boolean(query.trim()) || category !== 'all' || (onlyConfigured && policy?.selection.mode !== 'all') || onlyClosedComponents
   const hasChanges = policy != null && !organizationPackageMarketPoliciesEqual(policy, detail.packageMarketPolicy)
   const canEdit = detail.canManage
@@ -214,6 +258,10 @@ export function OrganizationPackageMarketPanel({
   useEffect(() => {
     setPage(1)
   }, [category, onlyClosedComponents, onlyConfigured, pageSize, query])
+
+  useEffect(() => {
+    if (policy?.selection.mode === 'all' && onlyConfigured) setOnlyConfigured(false)
+  }, [onlyConfigured, policy?.selection.mode])
 
   useEffect(() => {
     if (page !== pagedComponentRules.page) setPage(pagedComponentRules.page)
@@ -243,6 +291,15 @@ export function OrganizationPackageMarketPanel({
     if (configuredFilteredCount === 0) return
     const filteredIds = new Set(componentTableRules.map((rule) => rule.canonicalId))
     updateSelection({ ruleIds: configuredRuleIds.filter((id) => !filteredIds.has(id)) })
+  }
+
+  function setCurrentCategoryEnabled(enabled: boolean) {
+    if (!currentCategory || policy?.selection.mode == null) return
+    updateSelection(setOrganizationPackageMarketCategoryEnabled(
+      policy.selection,
+      currentCategory.ruleIds,
+      enabled,
+    ))
   }
 
   function updateSelectionMode(mode: OrganizationPackageMarketSelectionMode) {
@@ -455,7 +512,9 @@ export function OrganizationPackageMarketPanel({
                 <p>统一管理成员范围与 Release、CI 渠道。渠道开关默认继承成员范围，单独配置后可覆盖，恢复默认即可撤销覆盖。</p>
               </div>
             </div>
-            <div className="organization-package-market-filters">
+            <div className={currentCategory
+              ? 'organization-package-market-filters has-category-toggle'
+              : 'organization-package-market-filters'}>
               <div className="organization-package-market-search">
                 <MagnifyingGlass aria-hidden="true" size={16} />
                 <Input
@@ -474,6 +533,21 @@ export function OrganizationPackageMarketPanel({
                   ))}
                 </SelectContent>
               </Select>
+              {currentCategory ? (
+                <div className={`organization-package-market-category-toggle ${currentCategoryIsMixed ? 'mixed' : ''}`}>
+                  <span>
+                    <strong>{currentCategory.label}分类</strong>
+                    <small>{currentCategoryIsMixed ? '部分开启' : currentCategoryEnabled ? '对成员可见' : '对成员隐藏'}</small>
+                  </span>
+                  <Toggle
+                    checked={currentCategoryEnabled}
+                    disabled={selectionDisabled || disablingCurrentCategoryWouldHideEverything}
+                    label={`${currentCategoryEnabled ? '关闭' : '开启'}${currentCategory.label}分类成员可见范围`}
+                    mixed={currentCategoryIsMixed}
+                    onChange={setCurrentCategoryEnabled}
+                  />
+                </div>
+              ) : null}
               <Button
                 aria-pressed={onlyClosedComponents}
                 className={onlyClosedComponents ? 'organization-package-market-filter-button active' : 'organization-package-market-filter-button'}
@@ -488,6 +562,7 @@ export function OrganizationPackageMarketPanel({
                 aria-pressed={onlyConfigured}
                 className={onlyConfigured ? 'organization-package-market-filter-button active' : 'organization-package-market-filter-button'}
                 disabled={selectionDisabled || policy.selection.mode === 'all'}
+                title={policy.selection.mode === 'all' ? '成员范围已覆盖全部组件，无需按已选范围筛选' : undefined}
                 type="button"
                 variant="outline"
                 onClick={() => setOnlyConfigured((current) => !current)}
@@ -508,14 +583,18 @@ export function OrganizationPackageMarketPanel({
               </Button>
             </div>
             <div className="organization-package-market-selection-toolbar">
-              <span>
-                {componentTableRules.length === selectableRules.length
-                  ? `共 ${selectableRules.length} 个顶级组件`
-                  : `当前筛选 ${componentTableRules.length} 个组件`}
-              </span>
-              <div>
+              <div className="organization-package-market-selection-summary">
+                <span>
+                  {componentTableRules.length === selectableRules.length
+                    ? `共 ${selectableRules.length} 个顶级组件`
+                    : `当前筛选 ${componentTableRules.length} 个组件`}
+                </span>
+                {!showMemberRangeColumn ? <span className="organization-package-market-range-all-state">成员范围：全部组件可见</span> : null}
+              </div>
+              <div className={showMemberRangeColumn ? 'organization-package-market-selection-actions' : 'organization-package-market-selection-actions all-mode'}>
                 <Button
                   disabled={selectionDisabled || policy.selection.mode === 'all' || allFilteredConfigured || componentTableRules.length === 0 || wouldExcludeEverySelectable}
+                  title={policy.selection.mode === 'all' ? '成员范围已覆盖全部组件，切换成员可见范围后可批量配置' : undefined}
                   type="button"
                   variant="ghost"
                   onClick={selectAllFiltered}
@@ -524,6 +603,7 @@ export function OrganizationPackageMarketPanel({
                 </Button>
                 <Button
                   disabled={selectionDisabled || policy.selection.mode === 'all' || configuredFilteredCount === 0}
+                  title={policy.selection.mode === 'all' ? '成员范围已覆盖全部组件，切换成员可见范围后可批量配置' : undefined}
                   type="button"
                   variant="ghost"
                   onClick={clearFilteredRules}
@@ -533,12 +613,14 @@ export function OrganizationPackageMarketPanel({
               </div>
             </div>
             <div className="organization-package-market-component-summary">
-              <span>{policy.selection.mode === 'all' ? '成员范围：全部组件' : `${configuredCount} 个组件已${isExclusionMode ? '禁止' : '加入范围'}`}</span>
+              <span>{policy.selection.mode === 'all' ? '默认成员范围已覆盖全部组件' : `${configuredCount} 个组件已${isExclusionMode ? '禁止' : '加入范围'}`}</span>
               <span><i className="available" />可用 <i className="closed" />已关闭 <i className="dependency" />依赖</span>
             </div>
-            <div className="organization-package-market-component-table" aria-busy={catalogLoading}>
+            <div className={showMemberRangeColumn
+              ? 'organization-package-market-component-table'
+              : 'organization-package-market-component-table without-member-range'} aria-busy={catalogLoading}>
               <div className="organization-package-market-component-table-head">
-                <span>组件</span><span>类型</span><span>成员范围</span><span>Release</span><span>CI</span><span>状态</span>
+                <span>组件</span><span>类型</span>{showMemberRangeColumn ? <span>成员范围</span> : null}<span>Release</span><span>CI</span><span>状态</span>
               </div>
               {catalogLoading ? (
                 <div className="organization-package-market-list-state">
@@ -559,19 +641,19 @@ export function OrganizationPackageMarketPanel({
                         <span><strong>{rule.name}</strong><small>{rule.canonicalId}</small></span>
                       </div>
                       <span className="organization-package-market-component-type">{packageMarketCategoryLabel(rule)}</span>
-                      <label className="organization-package-market-component-range">
-                        <input
-                          aria-label={policy.selection.mode === 'all'
-                            ? `${rule.name}成员范围为全部`
-                            : `${configured ? '移出' : ruleActionLabel}${rule.name}的成员范围`}
-                          checked={configured}
-                          disabled={selectionDisabled || policy.selection.mode === 'all' || preventsLastExclusion}
-                          type="checkbox"
-                          onChange={() => toggleRule(rule.canonicalId)}
-                        />
-                        <span aria-hidden="true" />
-                        <small>{policy.selection.mode === 'all' ? '继承全部' : configured ? (isExclusionMode ? '已禁止' : '已加入') : '未配置'}</small>
-                      </label>
+                      {showMemberRangeColumn ? (
+                        <label className="organization-package-market-component-range">
+                          <input
+                            aria-label={`${configured ? '移出' : ruleActionLabel}${rule.name}的成员范围`}
+                            checked={configured}
+                            disabled={selectionDisabled || preventsLastExclusion}
+                            type="checkbox"
+                            onChange={() => toggleRule(rule.canonicalId)}
+                          />
+                          <span aria-hidden="true" />
+                          <small>{configured ? (isExclusionMode ? '已禁止' : '已加入') : '未配置'}</small>
+                        </label>
+                      ) : null}
                       {channels.map((channel) => {
                         const override = policy.ruleOverrides.find((item) => item.ruleId === rule.canonicalId && item.channel === channel)
                         const supported = ruleSupportsChannel(rule, channel)
@@ -622,7 +704,7 @@ export function OrganizationPackageMarketPanel({
                                 <span><strong>{dependency.name}</strong><small>由 {rule.name} 提供 · {dependency.canonicalId}</small></span>
                               </div>
                               <span className="organization-package-market-dependency-type">依赖 · {channelLabels[dependencyChannel]}</span>
-                              <span className="organization-package-market-component-range inherited">继承父组件</span>
+                              {showMemberRangeColumn ? <span className="organization-package-market-component-range inherited">继承父组件</span> : null}
                               {channels.map((channel) => channel === dependencyChannel ? (
                                 <div className="organization-package-market-component-channel" key={channel}>
                                   <Toggle
