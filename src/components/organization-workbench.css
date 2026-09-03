@@ -1802,7 +1802,7 @@
   min-width: 0;
   display: grid;
   align-content: start;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   border-right: 1px solid var(--line);
   background: color-mix(in oklch, var(--field) 32%, var(--surface));
 }
