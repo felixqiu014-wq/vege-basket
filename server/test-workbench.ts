@@ -2071,7 +2071,7 @@ router.patch('/test-spaces/:spaceId/version', asyncRoute(async (request, respons
         where space.id = $1
         for update of space
         `,
-        [spaceId, session.userId],
+        [spaceId],
       )
       const space = locked.rows[0]
       if (!space || !(await getDirectSpaceAccess(spaceId, session.userId, client))) {

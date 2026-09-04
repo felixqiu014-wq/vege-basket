@@ -75,6 +75,8 @@ test('Bug scope stays within the current space while its subject is returned as 
   assert.match(testWorkbenchClientSource, /tab === 'cases' && !activeSubject \?/u)
   assert.match(testWorkbenchClientSource, /test-bug-detail-meta/u)
   assert.match(testWorkbenchClientSource, /测试对象\s*<strong>\{bug\.testSubjectName/u)
+  assert.match(testWorkbenchClientSource, /测试空间\s*<strong>\{bug\.testSpaceName \|\| '未记录'\}/u)
+  assert.match(testWorkbenchClientSource, /当前测试空间还没有测试对象，请先创建测试对象/u)
   assert.match(testWorkbenchClientSource, /<Label>\s*测试对象[\s\S]*subjects\.map/u)
 })
 
@@ -83,7 +85,7 @@ test('assigned Bug details include their test subject and space version label', 
   assert.match(testWorkbenchSource, /testSpaceVersionLabel: row\.test_space_version_label\s*\? decryptText\(row\.test_space_version_label\)\s*:\s*undefined/u)
   assert.match(testWorkbenchClientSource, /selected\.testSubjectName/u)
   assert.match(testWorkbenchClientSource, /selected\.testSpaceVersionLabel \|\| '未指定'/u)
-  assert.match(testWorkbenchClientSource, /<small>版本号 \{bug\.testSpaceVersionLabel \|\| '未指定'\}/u)
+  assert.match(testWorkbenchClientSource, /<small>\{bug\.testSpaceName \|\| '未知测试空间'\} · 版本号 \{bug\.testSpaceVersionLabel \|\| '未指定'\}/u)
   assert.match(testWorkbenchClientSource, /label: `\$\{bug\.testSpaceName\}\$\{bug\.testSpaceVersionLabel \? ` · \$\{bug\.testSpaceVersionLabel\}` : ''\}`/u)
 })
 
@@ -302,6 +304,7 @@ test('Bug deletion and version routes recheck direct membership and keep mutatio
   const bugDeleteRoute = testWorkbenchSource.slice(bugDeleteStart, commentsStart)
   assert.match(versionRoute, /requireActiveRole\(request, response, 'tester'\)/u)
   assert.match(versionRoute, /getDirectSpaceAccess\(spaceId, session\.userId, client\)/u)
+  assert.match(versionRoute, /where space\.id = \$1[\s\S]*\[spaceId\]/u)
   assert.match(versionRoute, /from test_bugs[\s\S]*reporter_user_id = \$2[\s\S]*for share/u)
   assert.match(versionRoute, /canEditTestSpaceVersion/u)
   assert.match(versionRoute, /set version_label = \$1, version_label_lookup = \$2, updated_at = now\(\)/u)

@@ -1332,6 +1332,7 @@ export function TestWorkbench({
                 onUpdateComment={(bug, comment, content) => mutate(() => updateTestBugComment(bug.testSpaceId, bug.id, comment.id, content))}
                 onDeleteComment={(bug, comment) => mutate(() => deleteTestBugComment(bug.testSpaceId, bug.id, comment.id))}
                 onUpdateSpaceVersion={(bug, versionLabel) => mutate(() => updateTestSpaceVersion(bug.testSpaceId, versionLabel))}
+                onVersionEditUnavailable={(message) => setError(message)}
               />
             </>
           )}
@@ -2215,7 +2216,7 @@ function PlanCaseDetailDialog({ onClose, planCase }: {
   )
 }
 
-function BugsView({ bugs, busy, data, draftOwnerUserId, filterConditions, onAssignee, onComment, onCreate, onDelete, onDeleteComment, onEdit, onFilterClear, onFilterOpenChange, onSelect, onStatus, onTransferSpace, onUpdateComment, onUpdateSpaceVersion, readOnly, searchQuery, onSearchQueryChange, selectedId, versionOptions }: {
+function BugsView({ bugs, busy, data, draftOwnerUserId, filterConditions, onAssignee, onComment, onCreate, onDelete, onDeleteComment, onEdit, onFilterClear, onFilterOpenChange, onSelect, onStatus, onTransferSpace, onUpdateComment, onUpdateSpaceVersion, onVersionEditUnavailable, readOnly, searchQuery, onSearchQueryChange, selectedId, versionOptions }: {
   bugs: TestBug[]
   busy: boolean
   data: TestWorkbenchData
@@ -2236,6 +2237,7 @@ function BugsView({ bugs, busy, data, draftOwnerUserId, filterConditions, onAssi
   onTransferSpace: (bug: TestBug, targetSpaceId: number) => Promise<boolean>
   onUpdateComment: (bug: TestBug, comment: TestBugComment, content: string) => Promise<boolean>
   onUpdateSpaceVersion: (bug: TestBug, versionLabel: string) => Promise<boolean>
+  onVersionEditUnavailable: (message: string) => void
   readOnly: boolean
   searchQuery: string
   selectedId?: number
@@ -2281,14 +2283,14 @@ function BugsView({ bugs, busy, data, draftOwnerUserId, filterConditions, onAssi
             {bugs.length ? bugs.map((bug) => <button key={bug.id} className={bug.id === selectedId ? 'active' : ''} onClick={() => onSelect(bug.id)}><div><code>BUG-{bug.id}</code><Badge className={`test-bug-status ${bug.status}`} variant="outline">{bugStatusLabel[bug.status]}</Badge></div><strong>{bug.title}</strong><small>{formatTimestamp(bug.updatedAt)} · <UserName departedUserIds={data.departedUserIds} name={bug.assigneeName || '未分配'} userId={bug.assigneeUserId} />{bug.assigneeTransferSource === 'offboarding' ? '（离职转移）' : null}</small></button>) : <div className="test-list-empty">{filterConditions.length > 0 || searchQuery.trim() ? <><FunnelSimple size={24} /><span>没有符合当前条件的 Bug。</span>{filterConditions.length > 0 ? <Button type="button" variant="outline" onClick={onFilterClear}>清除筛选</Button> : null}{searchQuery.trim() ? <Button type="button" variant="outline" onClick={() => onSearchQueryChange('')}>清除搜索</Button> : null}</> : '当前测试对象还没有 Bug。'}</div>}
         </div>
         <div className="test-record-detail">
-          {selected ? <BugDetail bug={selected} busy={busy} departedUserIds={data.departedUserIds} draftOwnerUserId={draftOwnerUserId} readOnly={readOnly} users={data.users} versionOptions={versionOptions} onAssignee={onAssignee} onComment={readOnly ? undefined : onComment} onDelete={onDelete} onDeleteComment={readOnly ? undefined : onDeleteComment} onEdit={onEdit} onStatus={onStatus} onTransferSpace={onTransferSpace} onUpdateComment={readOnly ? undefined : onUpdateComment} onUpdateSpaceVersion={onUpdateSpaceVersion} /> : <div className="test-detail-empty"><Bug size={28} /><p>选择一个 Bug 查看和流转。</p></div>}
+          {selected ? <BugDetail bug={selected} busy={busy} departedUserIds={data.departedUserIds} draftOwnerUserId={draftOwnerUserId} readOnly={readOnly} users={data.users} versionOptions={versionOptions} onAssignee={onAssignee} onComment={readOnly ? undefined : onComment} onDelete={onDelete} onDeleteComment={readOnly ? undefined : onDeleteComment} onEdit={onEdit} onStatus={onStatus} onTransferSpace={onTransferSpace} onUpdateComment={readOnly ? undefined : onUpdateComment} onUpdateSpaceVersion={onUpdateSpaceVersion} onVersionEditUnavailable={onVersionEditUnavailable} /> : <div className="test-detail-empty"><Bug size={28} /><p>选择一个 Bug 查看和流转。</p></div>}
         </div>
       </div>
     </div>
   )
 }
 
-function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, onComment, onDelete, onDeleteComment, onEdit, onStatus, onTransferSpace, onUpdateComment, onUpdateSpaceVersion, readOnly, users, versionOptions }: {
+function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, onComment, onDelete, onDeleteComment, onEdit, onStatus, onTransferSpace, onUpdateComment, onUpdateSpaceVersion, onVersionEditUnavailable, readOnly, users, versionOptions }: {
   bug: TestBug
   busy: boolean
   departedUserIds: readonly number[]
@@ -2302,6 +2304,7 @@ function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, o
   onTransferSpace: (bug: TestBug, targetSpaceId: number) => Promise<boolean>
   onUpdateComment?: (bug: TestBug, comment: TestBugComment, content: string) => Promise<boolean>
   onUpdateSpaceVersion: (bug: TestBug, versionLabel: string) => Promise<boolean>
+  onVersionEditUnavailable: (message: string) => void
   readOnly: boolean
   users: TestWorkbenchData['users']
   versionOptions: string[]
@@ -2347,7 +2350,18 @@ function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, o
     <div className="test-bug-controls"><Label>状态<Select value={visibleBugStatus(bug.status)} onValueChange={(value) => onStatus(bug, selectedBugStatus(bug, value as BugStatus))} disabled={busy || readOnly}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{bugStatusOptions.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></Label><Label>负责人<Select value={bug.assigneeUserId ? String(bug.assigneeUserId) : 'none'} onValueChange={(value) => onAssignee(bug, value === 'none' ? undefined : Number(value))} disabled={busy || readOnly}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">未分配</SelectItem>{developers.map((user) => <SelectItem key={user.id} value={String(user.id)}>{user.displayName}</SelectItem>)}</SelectContent></Select></Label></div>
     <div className="test-detail-meta test-bug-detail-meta">
       <span>测试对象 <strong>{bug.testSubjectName || '未记录'}</strong></span>
-      <span>空间版本 <span className="test-detail-meta-label"><strong>{bug.testSpaceVersionLabel || '未指定'}</strong>{bug.canEditSpaceVersion ? <Button aria-label="修改空间版本" className="test-detail-meta-copy" disabled={busy} onClick={() => setVersionDialogOpen(true)} size="icon-xs" title="修改空间版本" variant="ghost"><PencilSimple /></Button> : null}</span></span>
+      <span>测试空间 <strong>{bug.testSpaceName || '未记录'}</strong></span>
+      <span>空间版本 <span className="test-detail-meta-label"><strong>{bug.testSpaceVersionLabel || '未指定'}</strong>{bug.canEditSpaceVersion ? <Button aria-label="修改空间版本" className="test-detail-meta-copy" disabled={busy} onClick={() => {
+        if (!bug.testSubjectName?.trim()) {
+          onVersionEditUnavailable('当前测试空间还没有测试对象，请先创建测试对象。')
+          return
+        }
+        if (!versionOptions.length) {
+          onVersionEditUnavailable('当前测试空间暂无可用版本，请先在空间管理中配置版本号。')
+          return
+        }
+        setVersionDialogOpen(true)
+      }} size="icon-xs" title="修改空间版本" variant="ghost"><PencilSimple /></Button> : null}</span></span>
       <span>严重程度 <strong>{severityLabel[bug.severity]}</strong></span>
       <span>优先级 <strong>{priorityLabel[bug.priority]}</strong></span>
       <span>
@@ -4997,7 +5011,7 @@ export function AssignedTestBugs({
               <button key={bug.id} className={bug.id === selectedId ? 'active' : ''} onClick={() => setSelectedId(bug.id)}>
                 <div><code>BUG-{bug.id}</code><Badge className={`test-bug-status ${bug.status}`} variant="outline">{bugStatusLabel[bug.status]}</Badge></div>
                 <strong>{bug.title}</strong>
-                <small>版本号 {bug.testSpaceVersionLabel || '未指定'} · {formatTimestamp(bug.updatedAt)} · {bug.assigneeName || '未分配'}{bug.assigneeTransferSource === 'offboarding' ? '（离职转移）' : null}</small>
+                <small>{bug.testSpaceName || '未知测试空间'} · 版本号 {bug.testSpaceVersionLabel || '未指定'} · {formatTimestamp(bug.updatedAt)} · {bug.assigneeName || '未分配'}{bug.assigneeTransferSource === 'offboarding' ? '（离职转移）' : null}</small>
               </button>
             ))}
           </div>
@@ -5052,6 +5066,7 @@ export function AssignedTestBugs({
                 <div className="test-detail-meta assigned-bug-detail-meta">
                   <span>负责人 <UserName departedUserIds={departedUserIds} name={selected.assigneeName || '未分配'} userId={selected.assigneeUserId} /></span>
                   <span>测试对象 <strong>{selected.testSubjectName}</strong></span>
+                  <span>测试空间 <strong>{selected.testSpaceName || '未记录'}</strong></span>
                   <span>版本号 <strong>{selected.testSpaceVersionLabel || '未指定'}</strong></span>
                   <span>严重程度 <strong>{severityLabel[selected.severity]}</strong></span>
                 </div>
