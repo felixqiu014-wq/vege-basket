@@ -160,9 +160,7 @@ export function acceptTestSpaceInviteLink(token: string, password?: string) {
 
 export function createTestSubject(spaceId: number, payload: {
   description?: string
-  environment?: string
   name: string
-  versionLabel?: string
 }) {
   return request<TestWorkbenchData>(`/api/test-spaces/${spaceId}/subjects`, {
     method: 'POST',
@@ -172,9 +170,7 @@ export function createTestSubject(spaceId: number, payload: {
 
 export function updateTestSubject(spaceId: number, subjectId: number, payload: {
   description?: string
-  environment?: string
   name: string
-  versionLabel?: string
 }) {
   return request<TestWorkbenchData>(`/api/test-spaces/${spaceId}/subjects/${subjectId}`, {
     method: 'PATCH',

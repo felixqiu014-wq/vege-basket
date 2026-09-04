@@ -102,11 +102,9 @@ export type TestSubject = {
   canEdit: boolean
   createdAt: string
   description: string
-  environment: string
   id: number
   name: string
   testSpaceId: number
-  versionLabel: string
 }
 
 export type TestCaseFolder = {

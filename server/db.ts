@@ -13,6 +13,9 @@ if (!databaseUrl) {
 
 export const pool = new Pool({
   connectionString: databaseUrl,
+  // getTestWorkbench fans out independent reads; avoid queuing its 13 queries
+  // behind the default ten-connection pool during refreshes.
+  max: 20,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10_000,
 })

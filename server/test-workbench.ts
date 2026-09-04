@@ -1325,14 +1325,12 @@ async function getTestWorkbench(userId: number) {
       created_at: Date
       created_by_user_id: string | null
       description: string
-      environment: string
       id: string
       name: string
       test_space_id: string
-      version_label: string
     }>(
       `
-      select s.*
+      select s.id, s.test_space_id, s.created_by_user_id, s.name, s.description, s.created_at
       from test_subjects s
       join test_spaces space on space.id = s.test_space_id
       left join test_space_memberships m
@@ -1902,11 +1900,9 @@ async function getTestWorkbench(userId: number) {
       canEdit: canEditTestSubject(row.created_by_user_id ? Number(row.created_by_user_id) : null, userId),
       createdAt: row.created_at.toISOString(),
       description: decryptText(row.description),
-      environment: decryptText(row.environment),
       id: Number(row.id),
       name: decryptText(row.name),
       testSpaceId: Number(row.test_space_id),
-      versionLabel: decryptText(row.version_label),
     })),
     users: users.rows.map((row) => ({
       displayName: row.display_name || row.email,
@@ -2589,8 +2585,8 @@ router.post('/test-spaces/:spaceId/subjects', asyncRoute(async (request, respons
   await query(
     `
     insert into test_subjects
-      (test_space_id, created_by_user_id, name, name_lookup, description, version_label, environment)
-    values ($1, $2, $3, $4, $5, $6, $7)
+      (test_space_id, created_by_user_id, name, name_lookup, description)
+    values ($1, $2, $3, $4, $5)
     `,
     [
       spaceId,
@@ -2598,8 +2594,6 @@ router.post('/test-spaces/:spaceId/subjects', asyncRoute(async (request, respons
       encryptText(name),
       blindIndex(name),
       encryptText(text(request.body.description, 2000)),
-      encryptText(text(request.body.versionLabel, 80)),
-      encryptText(text(request.body.environment, 160)),
     ],
   )
   response.status(201).json(await getTestWorkbench(session.userId))
@@ -2642,18 +2636,14 @@ router.patch('/test-spaces/:spaceId/subjects/:subjectId', asyncRoute(async (requ
       set name = $1,
         name_lookup = $2,
         description = $3,
-        version_label = $4,
-        environment = $5,
         updated_at = now()
-      where id = $6 and test_space_id = $7 and created_by_user_id = $8
+      where id = $4 and test_space_id = $5 and created_by_user_id = $6
       returning id
       `,
       [
         encryptText(name),
         blindIndex(name),
         encryptText(text(request.body.description, 2000)),
-        encryptText(text(request.body.versionLabel, 80)),
-        encryptText(text(request.body.environment, 160)),
         subjectId,
         spaceId,
         session.userId,

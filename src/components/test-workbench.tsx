@@ -1118,7 +1118,6 @@ export function TestWorkbench({
                         onClick={() => setSubjectId(subject.id)}
                       >
                         <strong>{subject.name}</strong>
-                        <small>{[subject.versionLabel, subject.environment].filter(Boolean).join(' / ') || '未设置版本与环境'}</small>
                       </button>
                       {!activeSpaceReadOnly && (subject.canEdit || subject.canDelete) ? (
                         <DropdownMenu>
@@ -3657,41 +3656,33 @@ function SubjectDialog({
 }: {
   busy: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (payload: { description: string; environment: string; name: string; versionLabel: string }) => Promise<boolean>
+  onSubmit: (payload: { description: string; name: string }) => Promise<boolean>
   open: boolean
   subject?: TestSubject
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [versionLabel, setVersionLabel] = useState('')
-  const [environment, setEnvironment] = useState('')
   useEffect(() => {
     if (!open) return
     setName(subject?.name ?? '')
     setDescription(subject?.description ?? '')
-    setVersionLabel(subject?.versionLabel ?? '')
-    setEnvironment(subject?.environment ?? '')
-  }, [open, subject?.description, subject?.environment, subject?.id, subject?.name, subject?.versionLabel])
+  }, [open, subject?.description, subject?.id, subject?.name])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent fixedHeader className="test-wide-dialog">
         <DialogHeader>
           <DialogTitle>{subject ? '编辑测试对象' : '新建测试对象'}</DialogTitle>
-          <DialogDescription>测试对象独立存在，用于承载对象版本、环境和用例。</DialogDescription>
+          <DialogDescription>测试对象独立存在，用于承载测试用例和测试计划。</DialogDescription>
         </DialogHeader>
         <form className="test-dialog-form" onSubmit={async (event) => {
           event.preventDefault()
           if (!name.trim()) return
-          const saved = await onSubmit({ description, environment, name, versionLabel })
+          const saved = await onSubmit({ description, name })
           if (saved) onOpenChange(false)
         }}>
           <Label>名称<Input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></Label>
           <Label>说明<Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></Label>
-          <div className="test-form-grid">
-            <Label>当前版本<Input value={versionLabel} onChange={(event) => setVersionLabel(event.target.value)} placeholder="v1.0.0" /></Label>
-            <Label>默认环境<Input value={environment} onChange={(event) => setEnvironment(event.target.value)} placeholder="测试环境" /></Label>
-          </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
             <Button disabled={busy || !name.trim()}>{busy ? (subject ? '保存中...' : '创建中...') : (subject ? '保存' : '创建')}</Button>
@@ -4280,7 +4271,6 @@ function PlanDialog({ busy, cases, folders, onOpenChange, onSubmit, open, plan, 
                       />
                       <span>
                         <strong>{subject.name}</strong>
-                        <small>{[subject.versionLabel, subject.environment].filter(Boolean).join(' / ') || '未设置版本与环境'}</small>
                       </span>
                     </label>
                   )) : <p className="test-list-empty">当前测试空间还没有测试对象。</p>}

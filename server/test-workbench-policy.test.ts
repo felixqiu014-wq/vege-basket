@@ -371,7 +371,7 @@ test('test case deletion is exposed only when allowed and requires confirmation'
   assert.match(testWorkbenchClientSource, /<Button variant="outline" onClick=\{\(\) => onArchive\(selected\)\}>归档为基线<\/Button>/u)
 })
 
-test('test subject editing uses a dedicated patch route and updates all metadata fields', () => {
+test('test subject editing uses a dedicated patch route without version or environment fields', () => {
   const patchRouteStart = testWorkbenchSource.indexOf("router.patch('/test-spaces/:spaceId/subjects/:subjectId'")
   const deleteRouteStart = testWorkbenchSource.indexOf("router.delete('/test-spaces/:spaceId/subjects/:subjectId'")
 
@@ -380,7 +380,8 @@ test('test subject editing uses a dedicated patch route and updates all metadata
 
   const patchRoute = testWorkbenchSource.slice(patchRouteStart, deleteRouteStart)
   assert.match(patchRoute, /Only the test subject creator can edit it/u)
-  assert.match(patchRoute, /set name = \$1,\s+name_lookup = \$2,\s+description = \$3,\s+version_label = \$4,\s+environment = \$5/u)
+  assert.match(patchRoute, /set name = \$1,\s+name_lookup = \$2,\s+description = \$3,\s+updated_at = now\(\)/u)
+  assert.doesNotMatch(testWorkbenchClientSource, /当前版本|默认环境/u)
 })
 
 test('test space invitation policy accepts only supported states and expiries', () => {
