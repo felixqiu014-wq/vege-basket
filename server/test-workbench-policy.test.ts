@@ -44,18 +44,13 @@ test('test spaces persist encrypted organization-scoped unique versions', () => 
   assert.match(testWorkbenchClientSource, /!name\.trim\(\) \|\| !versionLabel\.trim\(\) \|\| !organizationValue/u)
   assert.match(testWorkbenchClientSource, /TestSpaceSelectLabel/u)
   assert.match(testWorkbenchClientSource, /<span>版本号<\/span><strong>\{selectedSpace\.versionLabel \|\| '未指定'\}<\/strong>/u)
-  assert.match(testWorkbenchClientSource, /<SelectTrigger aria-label="选择空间版本"><SelectValue placeholder="选择版本" \/><\/SelectTrigger>/u)
-  assert.match(testWorkbenchClientSource, /versionOptions\.map\(\(version\) => <SelectItem/u)
+  assert.doesNotMatch(testWorkbenchClientSource, /<DialogTitle>修改空间版本<\/DialogTitle>/u)
+  assert.match(testWorkbenchClientSource, /迁移到其他测试空间/u)
   const createDialog = testWorkbenchClientSource.slice(
     testWorkbenchClientSource.indexOf('function TestSpaceCreateDialog'),
     testWorkbenchClientSource.indexOf('function TestSpaceDataImportDialog'),
   )
   assert.match(createDialog, /<Input maxLength=\{80\} value=\{versionLabel\}/u)
-  const versionDialog = testWorkbenchClientSource.slice(
-    testWorkbenchClientSource.indexOf('<DialogTitle>修改空间版本</DialogTitle>'),
-    testWorkbenchClientSource.indexOf('function BugSpaceTransferDialog'),
-  )
-  assert.doesNotMatch(versionDialog, /<Input/u)
 })
 
 test('test-space member settings do not show unrelated departed accounts', () => {
@@ -235,11 +230,14 @@ test('case workbench exports the current test-object cases and labels import as 
   assert.match(testWorkbenchClientSource, /testCaseCsvTemplateHeaders, \.\.\.rows/u)
 })
 
-test('Bug details offer owner-only single-space transfer with the existing transfer transaction', () => {
+test('Bug details offer same-organization space transfer with the existing transfer transaction', () => {
   assert.match(testWorkbenchSource, /router\.post\('\/test-spaces\/:spaceId\/bugs\/:bugId\/transfer-space'/u)
   assert.match(testWorkbenchSource, /bugIds: \[bugId\], categories: \['bugs'\], spaceId/u)
-  assert.match(testWorkbenchSource, /canTransferSpace: ownedSpaces\.some/u)
+  assert.match(testWorkbenchSource, /canTransferSpace: canEditTestSpaceVersion/u)
   assert.match(testWorkbenchSource, /transferSpaceCandidates: ownedSpaces/u)
+  assert.match(testWorkbenchSource, /space\.organization_id === row\.organization_id/u)
+  assert.match(testWorkbenchSource, /allowBugCreatorTransfer: true/u)
+  assert.match(testWorkbenchSource, /目标测试空间还没有测试对象，请先创建测试对象/u)
   assert.match(testWorkbenchClientSource, /bug\.canTransferSpace/u)
   assert.match(testWorkbenchClientSource, /<BugSpaceTransferDialog/u)
   assert.match(testWorkbenchClientSource, /<DialogTitle>转移 Bug 到其他空间<\/DialogTitle>/u)

@@ -21,6 +21,7 @@ export type TestSpace = {
   createdAt: string
   id: number
   name: string
+  organizationId?: number
   ownerUserId: number
   versionLabel?: string
 }
