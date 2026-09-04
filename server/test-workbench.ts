@@ -245,6 +245,12 @@ function isDatabaseUniqueViolation(error: unknown) {
   return error instanceof Error && 'code' in error && (error as { code?: string }).code === '23505'
 }
 
+type TestSpaceVersionConflictRow = {
+  id: string
+  version_label: string | null
+  version_label_lookup: string | null
+}
+
 async function hasTestSpaceVersionConflict(
   client: PoolClient,
   organizationId: number,
@@ -252,18 +258,23 @@ async function hasTestSpaceVersionConflict(
   excludedSpaceId?: number,
 ) {
   const lookup = blindIndex(versionLabel)
-  const result = await client.query<{
-    id: string
-    version_label: string | null
-    version_label_lookup: string | null
-  }>(
-    `select id, version_label, version_label_lookup
-       from test_spaces
-      where organization_id = $1
-        and ($2::bigint is null or id <> $2::bigint)
-      for share`,
-    [organizationId, excludedSpaceId ?? null],
-  )
+  const result = excludedSpaceId == null
+    ? await client.query<TestSpaceVersionConflictRow>(
+      `select id, version_label, version_label_lookup
+         from test_spaces
+        where organization_id = $1
+        for share`,
+      [organizationId],
+    )
+    : await client.query<TestSpaceVersionConflictRow>(
+      `select id, version_label, version_label_lookup
+         from test_spaces
+        where organization_id = $1
+          and id <> $2::bigint
+        for share`,
+      [organizationId, excludedSpaceId],
+    )
+  /* Keep the clear-text comparison for legacy rows whose lookup is not backfilled. */
   return result.rows.some((row) => {
     if (row.version_label_lookup === lookup) return true
     if (!row.version_label) return false
