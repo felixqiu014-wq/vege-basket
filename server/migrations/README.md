@@ -24,6 +24,7 @@ The current migrations are:
 | `20260828_organization_package_market_policy_excluded_mode.sql` | Extends the channel-policy mode constraint with the `excluded` deny-list mode. |
 | `20260828_organization_package_market_policy_shared_selection.sql` | Adds one canonical organization-wide visibility range and safely derives it from legacy channel policies without broadening package access. |
 | `20260904_test_environments.sql` | Adds reusable encrypted organization test environments, space assignments, and nullable Bug environment references with assignment integrity. |
+| `20260904_test_space_version_uniqueness.sql` | Adds the encrypted test-space version lookup and organization-scoped uniqueness index. |
 
 For the organization package-market policy release, update the image only. API startup applies
 the matching idempotent `schemaSql` definition, so no manual `psql` or `db:init` run is required.

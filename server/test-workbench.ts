@@ -241,6 +241,36 @@ function asyncRoute(
   }
 }
 
+function isDatabaseUniqueViolation(error: unknown) {
+  return error instanceof Error && 'code' in error && (error as { code?: string }).code === '23505'
+}
+
+async function hasTestSpaceVersionConflict(
+  client: PoolClient,
+  organizationId: number,
+  versionLabel: string,
+  excludedSpaceId?: number,
+) {
+  const lookup = blindIndex(versionLabel)
+  const result = await client.query<{
+    id: string
+    version_label: string | null
+    version_label_lookup: string | null
+  }>(
+    `select id, version_label, version_label_lookup
+       from test_spaces
+      where organization_id = $1
+        and ($2::bigint is null or id <> $2::bigint)
+      for share`,
+    [organizationId, excludedSpaceId ?? null],
+  )
+  return result.rows.some((row) => {
+    if (row.version_label_lookup === lookup) return true
+    if (!row.version_label) return false
+    return decryptText(row.version_label).trim().toLowerCase() === versionLabel.trim().toLowerCase()
+  })
+}
+
 async function transaction<T>(handler: (client: PoolClient) => Promise<T>) {
   const client = await pool.connect()
   try {
@@ -1877,24 +1907,28 @@ router.post('/test-spaces', asyncRoute(async (request, response) => {
   const name = text(request.body.name, 80)
   const versionLabel = text(request.body.versionLabel, 80)
   const organization = parseOptionalTestSpaceOrganizationId(request.body?.organizationId)
-  if (!name || !organization.valid) {
-    response.status(400).json({ error: 'Test space name and organization must be valid' })
+  if (!name || !versionLabel || !organization.valid || organization.value === null) {
+    response.status(400).json({ error: 'Test space name, version, and organization are required' })
     return
   }
   const client = await pool.connect()
   try {
     await client.query('begin')
     if (
-      organization.value !== null
-      && !(await lockActiveOrganizationMembership(client, organization.value, session.userId))
+      !(await lockActiveOrganizationMembership(client, organization.value, session.userId))
     ) {
       await client.query('rollback')
       response.status(404).json({ error: 'Organization not found' })
       return
     }
+    if (await hasTestSpaceVersionConflict(client, organization.value, versionLabel)) {
+      await client.query('rollback')
+      response.status(409).json({ error: 'This version already exists in the organization' })
+      return
+    }
     const created = await client.query<{ id: string }>(
-      'insert into test_spaces (owner_user_id, name, version_label, organization_id) values ($1, $2, $3, $4) returning id',
-      [session.userId, encryptText(name), versionLabel ? encryptText(versionLabel) : null, organization.value],
+      'insert into test_spaces (owner_user_id, name, version_label, version_label_lookup, organization_id) values ($1, $2, $3, $4, $5) returning id',
+      [session.userId, encryptText(name), encryptText(versionLabel), blindIndex(versionLabel), organization.value],
     )
     const spaceId = Number(created.rows[0].id)
     await client.query(
@@ -1908,6 +1942,10 @@ router.post('/test-spaces', asyncRoute(async (request, response) => {
     await client.query('commit')
   } catch (error) {
     await client.query('rollback')
+    if (isDatabaseUniqueViolation(error)) {
+      response.status(409).json({ error: 'This version already exists in the organization' })
+      return
+    }
     throw error
   } finally {
     client.release()
@@ -1959,11 +1997,17 @@ router.patch('/test-spaces/:spaceId', asyncRoute(async (request, response) => {
         return
       }
     }
+    if (nextOrganizationId !== null && versionLabel && await hasTestSpaceVersionConflict(client, nextOrganizationId, versionLabel, spaceId)) {
+      await client.query('rollback')
+      response.status(409).json({ error: 'This version already exists in the organization' })
+      return
+    }
+    const versionLookup = versionLabel ? blindIndex(versionLabel) : null
     await client.query(
       `update test_spaces
-       set name = $1, version_label = $2, organization_id = $3, updated_at = now()
-       where id = $4 and owner_user_id = $5`,
-      [encryptText(name), versionLabel ? encryptText(versionLabel) : null, nextOrganizationId, spaceId, session.userId],
+       set name = $1, version_label = $2, version_label_lookup = $3, organization_id = $4, updated_at = now()
+       where id = $5 and owner_user_id = $6`,
+      [encryptText(name), versionLabel ? encryptText(versionLabel) : null, versionLookup, nextOrganizationId, spaceId, session.userId],
     )
     if (organizationChanged) {
       // Environment assignments are organization-scoped. The composite Bug FK
@@ -1983,6 +2027,10 @@ router.patch('/test-spaces/:spaceId', asyncRoute(async (request, response) => {
     await client.query('commit')
   } catch (error) {
     await client.query('rollback')
+    if (isDatabaseUniqueViolation(error)) {
+      response.status(409).json({ error: 'This version already exists in the organization' })
+      return
+    }
     throw error
   } finally {
     client.release()
@@ -1996,17 +2044,18 @@ router.patch('/test-spaces/:spaceId/version', asyncRoute(async (request, respons
   const spaceId = positiveId(request.params.spaceId)
   const hasVersionLabel = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'versionLabel')
   const versionLabel = text(request.body?.versionLabel, 80)
-  if (!spaceId || !hasVersionLabel) {
+  if (!spaceId || !hasVersionLabel || !versionLabel) {
     response.status(400).json({ error: 'Valid test space and version are required' })
     return
   }
   try {
     await transaction(async (client) => {
       const locked = await client.query<{
+        organization_id: string | null
         owner_user_id: string
       }>(
         `
-        select space.owner_user_id
+        select space.owner_user_id, space.organization_id
         from test_spaces space
         where space.id = $1
         for update of space
@@ -2029,16 +2078,23 @@ router.patch('/test-spaces/:spaceId/version', asyncRoute(async (request, respons
       if (!canEditTestSpaceVersion(Number(space.owner_user_id), bugReporterUserId, session.userId)) {
         throw importFailure('Only the test-space owner or a Bug creator can edit the space version', 403)
       }
+      if (space.organization_id && await hasTestSpaceVersionConflict(client, Number(space.organization_id), versionLabel, spaceId)) {
+        throw importFailure('This version already exists in the organization', 409)
+      }
       await client.query(
         `update test_spaces
-         set version_label = $1, updated_at = now()
-         where id = $2`,
-        [versionLabel ? encryptText(versionLabel) : null, spaceId],
+         set version_label = $1, version_label_lookup = $2, updated_at = now()
+         where id = $3`,
+        [encryptText(versionLabel), blindIndex(versionLabel), spaceId],
       )
     })
   } catch (error) {
     if (error instanceof Error && 'status' in error) {
       response.status(Number((error as Error & { status: number }).status)).json({ error: error.message })
+      return
+    }
+    if (isDatabaseUniqueViolation(error)) {
+      response.status(409).json({ error: 'This version already exists in the organization' })
       return
     }
     throw error

@@ -271,9 +271,11 @@ must remain bound to the authorized project ID.
   password. Pending invitations have no data access until accepted. Deletion requires the
   decrypted space name as confirmation and cascades to every subject, case, plan, bug,
   comment, membership, and invite link in the space.
-- A test-space version label is set in the create/settings flow. The space owner may change
-  it, and a direct active member who has created at least one Bug in that space may use the
-  version-only route; neither permission grants broader settings access.
+- A test-space version label is required when creating a new space and is unique within its
+  organization. It remains editable as text in the create/settings flow. The space owner may
+  change it, and a direct active member who has created at least one Bug in that space may use
+  the version-only route; neither permission grants broader settings access. Bug version edits
+  use a dropdown of existing versions from the current organization.
 - Test environments are organization resources with an encrypted name and absolute HTTP(S)
   access URL. They can be assigned to multiple test spaces in the same organization. Only
   an account with `organization_admin` plus active organization `owner` or `admin` access

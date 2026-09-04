@@ -1577,7 +1577,8 @@ create table if not exists test_spaces (
 
 alter table test_spaces
   add column if not exists organization_id bigint references organizations(id) on delete restrict,
-  add column if not exists version_label text;
+  add column if not exists version_label text,
+  add column if not exists version_label_lookup text;
 
 -- Test environments are organization-owned reusable endpoints. The human-facing
 -- fields are encrypted by the application; name_lookup is a keyed blind index
@@ -2303,6 +2304,9 @@ create index if not exists idx_test_environment_spaces_space_id
 create index if not exists idx_test_environment_spaces_environment_id
   on test_environment_spaces(test_environment_id, test_space_id);
 create index if not exists idx_test_spaces_organization_id on test_spaces(organization_id);
+create unique index if not exists idx_test_spaces_organization_version_lookup
+  on test_spaces(organization_id, version_label_lookup)
+  where organization_id is not null and version_label_lookup is not null;
 create index if not exists idx_test_bug_comments_bug_id
   on test_bug_comments(test_bug_id, created_at);
 `

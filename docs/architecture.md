@@ -373,7 +373,10 @@ The schema is normalized around these groups:
   `organization_admin` role and active owner/admin organization membership may maintain
   environments. Bug deletion stays creator-owned and requires direct current test-space
   membership. A test-space owner or a direct member who created a Bug in that space may
-  change its version label; that narrow permission does not permit other space settings.
+  change its version label; that narrow permission does not permit other space settings. New
+  spaces require an organization and version label, and the encrypted version label has an
+  organization-scoped blind-index uniqueness constraint. Bug version editing selects from
+  existing versions in the current organization, while create/settings keep text inputs.
 
 Foreign keys define deletion behavior. Deleting an AI conversation first records its UUID in a
 tombstone, then cascades its turns and attachments; saved summaries and processed proposal

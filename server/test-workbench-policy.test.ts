@@ -24,17 +24,38 @@ const schemaSource = readFileSync(new URL('./schema.ts', import.meta.url), 'utf8
 const testWorkbenchClientSource = readFileSync(new URL('../src/components/test-workbench.tsx', import.meta.url), 'utf8')
 const testWorkbenchApiSource = readFileSync(new URL('../src/test-workbench-api.ts', import.meta.url), 'utf8')
 const testWorkbenchSource = readFileSync(new URL('./test-workbench.ts', import.meta.url), 'utf8')
+const encryptExistingSource = readFileSync(new URL('./encrypt-existing.ts', import.meta.url), 'utf8')
+const versionMigrationSource = readFileSync(new URL('./migrations/20260904_test_space_version_uniqueness.sql', import.meta.url), 'utf8')
 
-test('test spaces persist and expose an optional version label', () => {
+test('test spaces persist encrypted organization-scoped unique versions', () => {
   assert.match(schemaSource, /add column if not exists version_label text/u)
+  assert.match(schemaSource, /add column if not exists version_label_lookup text/u)
+  assert.match(schemaSource, /idx_test_spaces_organization_version_lookup/u)
+  assert.match(versionMigrationSource, /unique index if not exists idx_test_spaces_organization_version_lookup/u)
+  assert.match(encryptExistingSource, /encryptTestSpaceVersionFields/u)
+  assert.match(encryptExistingSource, /Duplicate test-space versions found in one organization/u)
   assert.match(testWorkbenchSource, /select s\.id, s\.owner_user_id, s\.name, s\.version_label/u)
   assert.match(testWorkbenchSource, /select ts\.id, ts\.owner_user_id, ts\.name, ts\.version_label/u)
-  assert.match(testWorkbenchSource, /insert into test_spaces \(owner_user_id, name, version_label, organization_id\)/u)
-  assert.match(testWorkbenchSource, /set name = \$1, version_label = \$2, organization_id = \$3/u)
+  assert.match(testWorkbenchSource, /insert into test_spaces \(owner_user_id, name, version_label, version_label_lookup, organization_id\)/u)
+  assert.match(testWorkbenchSource, /set name = \$1, version_label = \$2, version_label_lookup = \$3, organization_id = \$4/u)
   assert.match(testWorkbenchSource, /versionLabel: row\.version_label \? decryptText\(row\.version_label\) : undefined/u)
-  assert.match(testWorkbenchClientSource, /createTestSpace\(normalizedName, versionLabel\.trim\(\)/u)
+  assert.match(testWorkbenchClientSource, /createTestSpace\(normalizedName, normalizedVersion, organizationId\)/u)
+  assert.match(testWorkbenchSource, /!name \|\| !versionLabel \|\| !organization\.valid \|\| organization\.value === null/u)
+  assert.match(testWorkbenchClientSource, /!name\.trim\(\) \|\| !versionLabel\.trim\(\) \|\| !organizationValue/u)
   assert.match(testWorkbenchClientSource, /TestSpaceSelectLabel/u)
   assert.match(testWorkbenchClientSource, /<span>版本号<\/span><strong>\{selectedSpace\.versionLabel \|\| '未指定'\}<\/strong>/u)
+  assert.match(testWorkbenchClientSource, /<SelectTrigger aria-label="选择空间版本"><SelectValue placeholder="选择版本" \/><\/SelectTrigger>/u)
+  assert.match(testWorkbenchClientSource, /versionOptions\.map\(\(version\) => <SelectItem/u)
+  const createDialog = testWorkbenchClientSource.slice(
+    testWorkbenchClientSource.indexOf('function TestSpaceCreateDialog'),
+    testWorkbenchClientSource.indexOf('function TestSpaceDataImportDialog'),
+  )
+  assert.match(createDialog, /<Input maxLength=\{80\} value=\{versionLabel\}/u)
+  const versionDialog = testWorkbenchClientSource.slice(
+    testWorkbenchClientSource.indexOf('<DialogTitle>修改空间版本</DialogTitle>'),
+    testWorkbenchClientSource.indexOf('function BugSpaceTransferDialog'),
+  )
+  assert.doesNotMatch(versionDialog, /<Input/u)
 })
 
 test('test-space member settings do not show unrelated departed accounts', () => {
@@ -283,7 +304,9 @@ test('Bug deletion and version routes recheck direct membership and keep mutatio
   assert.match(versionRoute, /getDirectSpaceAccess\(spaceId, session\.userId, client\)/u)
   assert.match(versionRoute, /from test_bugs[\s\S]*reporter_user_id = \$2[\s\S]*for share/u)
   assert.match(versionRoute, /canEditTestSpaceVersion/u)
-  assert.match(versionRoute, /set version_label = \$1, updated_at = now\(\)/u)
+  assert.match(versionRoute, /set version_label = \$1, version_label_lookup = \$2, updated_at = now\(\)/u)
+  assert.match(versionRoute, /hasTestSpaceVersionConflict\(client, Number\(space\.organization_id\), versionLabel, spaceId\)/u)
+  assert.match(versionRoute, /!spaceId \|\| !hasVersionLabel \|\| !versionLabel/u)
   assert.match(bugDeleteRoute, /getDirectSpaceAccess\(spaceId, session\.userId, client\)/u)
   assert.match(bugDeleteRoute, /canDeleteTestBug/u)
   assert.match(bugDeleteRoute, /delete from notification_deliveries/u)
@@ -382,7 +405,7 @@ test('test space organization selection accepts an active id or no organization'
 test('test space organization changes validate membership before updating', () => {
   const membershipLock = testWorkbenchSource.indexOf('lockActiveOrganizationMembership(client, nextOrganizationId')
   const memberValidation = testWorkbenchSource.indexOf('everyCurrentTestSpaceMemberBelongsToOrganization(client, spaceId, nextOrganizationId)')
-  const update = testWorkbenchSource.indexOf('set name = $1, version_label = $2, organization_id = $3, updated_at = now()')
+  const update = testWorkbenchSource.indexOf('set name = $1, version_label = $2, version_label_lookup = $3, organization_id = $4, updated_at = now()')
 
   assert.notEqual(membershipLock, -1)
   assert.notEqual(memberValidation, -1)
@@ -392,6 +415,7 @@ test('test space organization changes validate membership before updating', () =
   assert.match(testWorkbenchSource, /status in \('pending', 'active'\)[\s\S]*for share of membership/u)
   assert.match(testWorkbenchSource, /update test_space_invite_links set revoked_at = now\(\)/u)
   assert.match(testWorkbenchSource, /hasOwnProperty\.call\(request\.body \?\? \{\}, 'organizationId'\)/u)
+  assert.match(testWorkbenchSource, /hasTestSpaceVersionConflict\(client, nextOrganizationId, versionLabel, spaceId\)/u)
 })
 
 test('organization test-space invite links can be created and require member access on acceptance', () => {

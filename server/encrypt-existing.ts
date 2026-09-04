@@ -81,6 +81,44 @@ async function encryptTestEnvironmentFields() {
   }
 }
 
+async function encryptTestSpaceVersionFields() {
+  const result = await query<{
+    id: string
+    organization_id: string | null
+    version_label: string | null
+  }>(
+    `select id, organization_id, version_label from test_spaces`,
+  )
+
+  const seen = new Set<string>()
+  const updates: Array<{ id: number; lookup: string | null; version: string | null }> = []
+  for (const row of result.rows) {
+    const version = row.version_label ? decryptText(row.version_label).trim() : ''
+    const lookup = row.organization_id && version ? blindIndex(version) : null
+    if (lookup) {
+      const key = `${row.organization_id}:${lookup}`
+      if (seen.has(key)) {
+        throw new Error('Duplicate test-space versions found in one organization; resolve them before backfill')
+      }
+      seen.add(key)
+    }
+    updates.push({
+      id: Number(row.id),
+      lookup,
+      version: row.version_label ? maybeEncrypt(version) : null,
+    })
+  }
+
+  for (const update of updates) {
+    await query(
+      `update test_spaces
+       set version_label = $1, version_label_lookup = $2
+       where id = $3`,
+      [update.version, update.lookup, update.id],
+    )
+  }
+}
+
 async function main() {
   await query(schemaSql)
 
@@ -127,6 +165,7 @@ async function main() {
   await encryptProjectPackageOperationTodoNotes()
   await encryptColumn('test_cases', 'remarks')
   await encryptTestEnvironmentFields()
+  await encryptTestSpaceVersionFields()
 
   const collaborators = await query<{ id: string; name: string; role: string }>(
     'select id, name, role from collaborators',

@@ -29,10 +29,10 @@ export function fetchTestWorkbench() {
   return request<TestWorkbenchData>('/api/test-workbench')
 }
 
-export function createTestSpace(name: string, versionLabel?: string, organizationId?: number) {
+export function createTestSpace(name: string, versionLabel: string, organizationId: number) {
   return request<TestWorkbenchData>('/api/test-spaces', {
     method: 'POST',
-    body: JSON.stringify({ name, organizationId: organizationId ?? null, versionLabel: versionLabel ?? '' }),
+    body: JSON.stringify({ name, organizationId, versionLabel }),
   })
 }
 

@@ -692,6 +692,15 @@ export function TestWorkbench({
   const activeSpace = data.spaces.find((space) => space.id === spaceId)
   const activeManagedSpace = spaceSettings.spaces.find((space) => space.id === spaceId)
   const activeWeeklyReportOrganizationId = activeManagedSpace?.organizationId ?? null
+  const bugVersionOptions = useMemo(() => {
+    const organizationId = activeManagedSpace?.organizationId ?? null
+    const versions = spaceSettings.spaces
+      .filter((space) => (space.organizationId ?? null) === organizationId)
+      .map((space) => space.versionLabel?.trim() ?? '')
+      .filter(Boolean)
+    if (activeSpace?.versionLabel?.trim()) versions.push(activeSpace.versionLabel.trim())
+    return Array.from(new Set(versions))
+  }, [activeManagedSpace?.organizationId, activeSpace?.versionLabel, spaceSettings.spaces])
   const testSpaceOrganizationGroups = useMemo<TestSpaceOrganizationGroup[]>(() => {
     const visibleSpaceIds = new Set(data.spaces.map((space) => space.id))
     const groups = new Map<string, TestSpaceOrganizationGroup>()
@@ -942,11 +951,12 @@ export function TestWorkbench({
 
   async function handleCreateSpace(name: string, versionLabel: string, organizationId?: number) {
     const normalizedName = name.trim()
-    if (!normalizedName) return false
+    const normalizedVersion = versionLabel.trim()
+    if (!normalizedName || !normalizedVersion || organizationId == null) return false
     setBusy(true)
     setError('')
     try {
-      const result = await createTestSpace(normalizedName, versionLabel.trim(), organizationId)
+      const result = await createTestSpace(normalizedName, normalizedVersion, organizationId)
       const createdSpace = result.spaces.find((space) => space.name === normalizedName) ?? result.spaces[0]
       setData(result)
       setSpaceId(createdSpace?.id)
@@ -1299,6 +1309,7 @@ export function TestWorkbench({
                 bugs={filteredBugs}
                 busy={busy}
                 data={data}
+                versionOptions={bugVersionOptions}
                 draftOwnerUserId={currentUserId}
                 filterConditions={bugFilterConditions}
                 onFilterOpenChange={setBugFilterDialogOpen}
@@ -2204,10 +2215,11 @@ function PlanCaseDetailDialog({ onClose, planCase }: {
   )
 }
 
-function BugsView({ bugs, busy, data, draftOwnerUserId, filterConditions, onAssignee, onComment, onCreate, onDelete, onDeleteComment, onEdit, onFilterClear, onFilterOpenChange, onSelect, onStatus, onTransferSpace, onUpdateComment, onUpdateSpaceVersion, readOnly, searchQuery, onSearchQueryChange, selectedId }: {
+function BugsView({ bugs, busy, data, draftOwnerUserId, filterConditions, onAssignee, onComment, onCreate, onDelete, onDeleteComment, onEdit, onFilterClear, onFilterOpenChange, onSelect, onStatus, onTransferSpace, onUpdateComment, onUpdateSpaceVersion, readOnly, searchQuery, onSearchQueryChange, selectedId, versionOptions }: {
   bugs: TestBug[]
   busy: boolean
   data: TestWorkbenchData
+  versionOptions: string[]
   draftOwnerUserId?: number
   filterConditions: BugFilterCondition[]
   onAssignee: (bug: TestBug, assigneeUserId?: number) => void
@@ -2269,14 +2281,14 @@ function BugsView({ bugs, busy, data, draftOwnerUserId, filterConditions, onAssi
             {bugs.length ? bugs.map((bug) => <button key={bug.id} className={bug.id === selectedId ? 'active' : ''} onClick={() => onSelect(bug.id)}><div><code>BUG-{bug.id}</code><Badge className={`test-bug-status ${bug.status}`} variant="outline">{bugStatusLabel[bug.status]}</Badge></div><strong>{bug.title}</strong><small>{formatTimestamp(bug.updatedAt)} · <UserName departedUserIds={data.departedUserIds} name={bug.assigneeName || '未分配'} userId={bug.assigneeUserId} />{bug.assigneeTransferSource === 'offboarding' ? '（离职转移）' : null}</small></button>) : <div className="test-list-empty">{filterConditions.length > 0 || searchQuery.trim() ? <><FunnelSimple size={24} /><span>没有符合当前条件的 Bug。</span>{filterConditions.length > 0 ? <Button type="button" variant="outline" onClick={onFilterClear}>清除筛选</Button> : null}{searchQuery.trim() ? <Button type="button" variant="outline" onClick={() => onSearchQueryChange('')}>清除搜索</Button> : null}</> : '当前测试对象还没有 Bug。'}</div>}
         </div>
         <div className="test-record-detail">
-          {selected ? <BugDetail bug={selected} busy={busy} departedUserIds={data.departedUserIds} draftOwnerUserId={draftOwnerUserId} readOnly={readOnly} users={data.users} onAssignee={onAssignee} onComment={readOnly ? undefined : onComment} onDelete={onDelete} onDeleteComment={readOnly ? undefined : onDeleteComment} onEdit={onEdit} onStatus={onStatus} onTransferSpace={onTransferSpace} onUpdateComment={readOnly ? undefined : onUpdateComment} onUpdateSpaceVersion={onUpdateSpaceVersion} /> : <div className="test-detail-empty"><Bug size={28} /><p>选择一个 Bug 查看和流转。</p></div>}
+          {selected ? <BugDetail bug={selected} busy={busy} departedUserIds={data.departedUserIds} draftOwnerUserId={draftOwnerUserId} readOnly={readOnly} users={data.users} versionOptions={versionOptions} onAssignee={onAssignee} onComment={readOnly ? undefined : onComment} onDelete={onDelete} onDeleteComment={readOnly ? undefined : onDeleteComment} onEdit={onEdit} onStatus={onStatus} onTransferSpace={onTransferSpace} onUpdateComment={readOnly ? undefined : onUpdateComment} onUpdateSpaceVersion={onUpdateSpaceVersion} /> : <div className="test-detail-empty"><Bug size={28} /><p>选择一个 Bug 查看和流转。</p></div>}
         </div>
       </div>
     </div>
   )
 }
 
-function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, onComment, onDelete, onDeleteComment, onEdit, onStatus, onTransferSpace, onUpdateComment, onUpdateSpaceVersion, readOnly, users }: {
+function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, onComment, onDelete, onDeleteComment, onEdit, onStatus, onTransferSpace, onUpdateComment, onUpdateSpaceVersion, readOnly, users, versionOptions }: {
   bug: TestBug
   busy: boolean
   departedUserIds: readonly number[]
@@ -2292,6 +2304,7 @@ function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, o
   onUpdateSpaceVersion: (bug: TestBug, versionLabel: string) => Promise<boolean>
   readOnly: boolean
   users: TestWorkbenchData['users']
+  versionOptions: string[]
 }) {
   const developers = users.filter((user) => user.roles.includes('developer'))
   const [shareOpen, setShareOpen] = useState(false)
@@ -2373,7 +2386,12 @@ function BugDetail({ bug, busy, departedUserIds, draftOwnerUserId, onAssignee, o
         }}>
           <Label>
             版本号
-            <Input autoFocus maxLength={80} value={versionLabelDraft} onChange={(event) => setVersionLabelDraft(event.target.value)} placeholder="例如：v1.2.3" />
+            <Select value={versionLabelDraft} onValueChange={setVersionLabelDraft}>
+              <SelectTrigger aria-label="选择空间版本"><SelectValue placeholder="选择版本" /></SelectTrigger>
+              <SelectContent>
+                {versionOptions.map((version) => <SelectItem key={version} value={version}>{version}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </Label>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setVersionDialogOpen(false)}>取消</Button>
@@ -3222,13 +3240,13 @@ function TestSpaceCreateDialog({ busy, onOpenChange, onSubmit, open, organizatio
 }) {
   const [name, setName] = useState('')
   const [versionLabel, setVersionLabel] = useState('')
-  const [organizationValue, setOrganizationValue] = useState('none')
+  const [organizationValue, setOrganizationValue] = useState('')
 
   useEffect(() => {
     if (!open) {
       setName('')
       setVersionLabel('')
-      setOrganizationValue('none')
+      setOrganizationValue('')
     }
   }, [open])
 
@@ -3246,11 +3264,12 @@ function TestSpaceCreateDialog({ busy, onOpenChange, onSubmit, open, organizatio
             const saved = await onSubmit(
               name,
               versionLabel,
-              organizationValue === 'none' ? undefined : Number(organizationValue),
+              organizationValue ? Number(organizationValue) : undefined,
             )
             if (saved) {
               setName('')
               setVersionLabel('')
+              setOrganizationValue('')
             }
           }}
         >
@@ -3265,9 +3284,8 @@ function TestSpaceCreateDialog({ busy, onOpenChange, onSubmit, open, organizatio
           <Label>
             归属组织
             <Select value={organizationValue} onValueChange={setOrganizationValue}>
-              <SelectTrigger aria-label="测试空间归属组织"><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label="测试空间归属组织"><SelectValue placeholder="选择归属组织" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">不归属组织</SelectItem>
                 {organizations.map((organization) => (
                   <SelectItem key={organization.id} value={String(organization.id)}>{organization.name}</SelectItem>
                 ))}
@@ -3276,7 +3294,7 @@ function TestSpaceCreateDialog({ busy, onOpenChange, onSubmit, open, organizatio
           </Label>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-            <Button disabled={busy || !name.trim()}><Plus /> 创建空间</Button>
+            <Button disabled={busy || !name.trim() || !versionLabel.trim() || !organizationValue}><Plus /> 创建空间</Button>
           </DialogFooter>
         </form>
       </DialogContent>

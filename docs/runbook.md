@@ -100,6 +100,8 @@ psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
   --file=server/migrations/20260902_organization_package_market_rule_overrides.sql
 psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
   --file=server/migrations/20260904_test_environments.sql
+psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
+  --file=server/migrations/20260904_test_space_version_uniqueness.sql
 ```
 
 Future changes that need data transformation, destructive cleanup, or incompatible behavior
@@ -113,6 +115,11 @@ their encrypted `environment` text remains the fallback snapshot. Apply it only 
 approved backup against the intended database, then deploy code that understands the new
 relationship. Do not run `db:encrypt-existing` against production merely to validate this
 release: it is only needed for any legacy plaintext environment rows and is a mutating action.
+
+The test-space version release adds `test_spaces.version_label_lookup` and an organization-scoped
+unique index. Run `db:encrypt-existing` after taking the approved backup to encrypt legacy
+version labels and populate the lookup; it aborts without writing if duplicate versions already
+exist within one organization.
 
 `npm run db:init` applies the current idempotent schema. `npm run db:encrypt-existing`
 applies the schema and encrypts supported legacy plaintext fields. Both are mutating
