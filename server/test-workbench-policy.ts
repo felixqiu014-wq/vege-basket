@@ -48,6 +48,19 @@ export function canEditTestBug(reporterUserId: number | null, userId: number) {
   return reporterUserId === userId
 }
 
+/** Bug detail ownership is intentionally separate from assignee/editor access. */
+export function canDeleteTestBug(reporterUserId: number | null, userId: number) {
+  return canEditTestBug(reporterUserId, userId)
+}
+
+export function canEditTestSpaceVersion(
+  ownerUserId: number | null,
+  bugReporterUserId: number | null,
+  userId: number,
+) {
+  return ownerUserId === userId || bugReporterUserId === userId
+}
+
 export function isTestSpaceMembershipStatus(value: unknown): value is TestSpaceMembershipStatus {
   return testSpaceMembershipStatuses.includes(value as TestSpaceMembershipStatus)
 }

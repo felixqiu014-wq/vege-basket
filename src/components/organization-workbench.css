@@ -280,6 +280,164 @@
   font-variant-numeric: tabular-nums;
 }
 
+.organization-test-environments-intro {
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted-text);
+  font-size: 13px;
+}
+
+.organization-test-environment-list {
+  display: grid;
+}
+
+.organization-test-environment-row {
+  min-width: 0;
+  min-height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.organization-test-environment-row:last-child {
+  border-bottom: 0;
+}
+
+.organization-test-environment-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.organization-test-environment-main strong {
+  overflow: hidden;
+  color: var(--strong);
+  font-size: 14px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-test-environment-main a,
+.organization-test-environment-main > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-test-environment-main a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  color: color-mix(in oklch, var(--brand) 78%, var(--strong));
+  text-decoration: none;
+}
+
+.organization-test-environment-main a:hover {
+  text-decoration: underline;
+}
+
+.organization-test-environment-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.organization-test-environment-dialog {
+  width: min(560px, calc(100vw - 24px));
+}
+
+.organization-test-environment-form {
+  display: grid;
+  gap: 16px;
+}
+
+.organization-test-environment-form > label {
+  display: grid;
+  gap: 7px;
+  color: var(--strong);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.organization-test-environment-spaces {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.organization-test-environment-spaces legend {
+  margin-bottom: 4px;
+  color: var(--strong);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.organization-test-environment-spaces > p {
+  margin: 0 0 8px;
+  color: var(--muted-text);
+  font-size: 12px;
+}
+
+.organization-test-environment-spaces > div {
+  max-height: 220px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--soft);
+}
+
+.organization-test-environment-spaces label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.organization-test-environment-spaces label:hover {
+  background: var(--surface);
+}
+
+.organization-test-environment-spaces label > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.organization-test-environment-spaces label strong,
+.organization-test-environment-spaces label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-test-environment-spaces label strong {
+  color: var(--strong);
+  font-size: 13px;
+}
+
+.organization-test-environment-spaces label small {
+  color: var(--muted-text);
+  font-size: 11px;
+}
+
 .organization-section-heading,
 .organization-project-title-line,
 .organization-milestone-main > div,
@@ -1706,6 +1864,14 @@
   .organization-danger-zone {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .organization-test-environment-row {
+    align-items: flex-start;
+  }
+
+  .organization-test-environment-main {
+    width: calc(100% - 42px);
   }
 
   .organization-report-summary > header {

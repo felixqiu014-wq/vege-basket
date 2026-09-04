@@ -162,9 +162,9 @@ families are:
 | AI | `GET /api/ai/status`, `POST /api/ai/intent-classifications`, `GET/POST /api/ai/conversations/:conversationId/turns`, `POST .../turns/:turnId/document`, `POST .../turns/:turnId/retry`, `POST .../turns/:turnId/cancel`, `POST .../turns/:turnId/reconcile`, `GET /api/ai/conversations`, `PATCH/DELETE /api/ai/conversations/:conversationId`, `POST /api/projects/:projectId/summaries`, todo-proposal read/confirm routes |
 | Feishu webhooks | `/api/integrations/feishu/conversation-analysis`, `/api/integrations/feishu/events` |
 | Roles | `POST /api/auth/active-role`, `GET /api/admin/users`, `PATCH /api/admin/users/:userId/roles` |
-| Organizations | `/api/organizations/*`, system-admin organization creation, owner/admin organization rename, week-start setting and confirmed deletion, direct member admission, expiring `/api/organization-invite-links/*` browser links, legacy Feishu invitations, resource attachment, organization-admin project governance, direct organization-member admission to organization projects without invite notifications, milestones including inline `PATCH .../milestones/:milestoneId/status`, task overview, weekly reports, weekly summaries, and the dedicated package-market catalog/policy settings Tab |
+| Organizations | `/api/organizations/*`, system-admin organization creation, owner/admin organization rename, week-start setting and confirmed deletion, direct member admission, expiring `/api/organization-invite-links/*` browser links, legacy Feishu invitations, resource attachment, organization-admin project governance, test-environment `POST/PATCH/DELETE /api/organizations/:organizationId/test-environments(/:environmentId)`, direct organization-member admission to organization projects without invite notifications, milestones including inline `PATCH .../milestones/:milestoneId/status`, task overview, weekly reports, weekly summaries, and the dedicated package-market catalog/policy settings Tab |
 | Personal weekly reports | paginated `GET /api/weekly-reports/:organizationId`, `GET /api/weekly-reports/:organizationId/:weekStart`, the shared four-section editor/AI template, cursor-position source insertion, draft save, AI generation, and submit routes under `/api/weekly-reports/*` |
-| Test workbench | `GET /api/test-workbench`, owner-managed `/api/test-spaces/*` including optional organization assignment on create/update, creator-owned test-subject deletion, editor-managed case folders, tester-managed cases including creator-only `DELETE /api/test-spaces/:spaceId/cases/:caseId`, CSV case preview/import, creator-managed plan details/cases/deletion, executions, bugs, comments, and author-owned comment edits/deletions |
+| Test workbench | `GET /api/test-workbench`, owner-managed `/api/test-spaces/*` including optional organization assignment on create/update, direct-member owner-or-Bug-creator `PATCH /api/test-spaces/:spaceId/version`, creator-owned test-subject deletion, editor-managed case folders, tester-managed cases including creator-only `DELETE /api/test-spaces/:spaceId/cases/:caseId`, CSV case preview/import, creator-managed plan details/cases/deletion, executions, creator-only `DELETE /api/test-spaces/:spaceId/bugs/:bugId`, environment-bound Bugs, comments, and author-owned comment edits/deletions |
 | Test-space collaboration | `GET /api/test-spaces/settings`, username invitations, member access updates, pending invitation acceptance, and expiring `/api/test-space-invite-links/*` share links |
 | Assigned bugs | `GET/PATCH /api/test-bugs/*/assigned`, `POST /api/test-bugs/:bugId/assigned/transfer`, `POST /api/test-bugs/:bugId/assigned/reject` (mandatory reason, records an immutable `reject` comment and notifies the reporting tester by personal Feishu message), organization-admin assignment of unassigned Bugs with a direct Feishu notification to the new assignee, assigned-bug comments, and author-owned assigned-comment edits/deletions for the active developer role |
 
@@ -271,6 +271,15 @@ must remain bound to the authorized project ID.
   password. Pending invitations have no data access until accepted. Deletion requires the
   decrypted space name as confirmation and cascades to every subject, case, plan, bug,
   comment, membership, and invite link in the space.
+- A test-space version label is set in the create/settings flow. The space owner may change
+  it, and a direct active member who has created at least one Bug in that space may use the
+  version-only route; neither permission grants broader settings access.
+- Test environments are organization resources with an encrypted name and absolute HTTP(S)
+  access URL. They can be assigned to multiple test spaces in the same organization. Only
+  an account with `organization_admin` plus active organization `owner` or `admin` access
+  may create, edit, delete, or change assignments. A Bug accepts only an environment assigned
+  to its own space, stores the current name/URL as its encrypted legacy-compatible snapshot,
+  and retains that snapshot when the configuration is later removed.
 - Test-case status: `draft`, `active`, `archived` remains accepted for compatibility,
   but the workbench no longer exposes case versions or archived status as the primary
   workflow.
@@ -302,6 +311,10 @@ must remain bound to the authorized project ID.
 - Bug status: `new`, `pending_confirmation`, `assigned`, `in_progress`, `pending_verification`, `closed`, `rejected`.
   Returning a Bug to `pending_confirmation` replaces the former `reopened` status, and marking a
   duplicate Bug closes it instead of using a separate `duplicate` status.
+- Bug deletion requires the active tester persona, direct active membership in its test
+  space, and the reporting creator identity. It cascades comments, event timeline rows, and
+  share links; delivery rows that do not have foreign keys are explicitly removed in the
+  deletion transaction.
 - Bug lifecycle events (`test_bug_events`): creation, assignment, transfer, and every status
   change are appended with the acting user, previous/next status, and the involved assignee
   (encrypted fields are not involved; comments are intentionally not recorded). The Bug detail

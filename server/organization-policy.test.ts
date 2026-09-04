@@ -6,11 +6,14 @@ import {
   canManageOrganization,
   canManageOrganizationProjects,
   canManageOrganizationWeeklyReports,
+  canManageTestEnvironments,
   hashOrganizationInviteToken,
   isFreshFeishuTimestamp,
   isOrganizationTodoFieldUpdate,
   matchesOrganizationDeleteConfirmation,
   normalizeOrganizationName,
+  normalizeTestEnvironmentAccessUrl,
+  normalizeTestEnvironmentName,
   normalizeOrganizationProjectHealthStatus,
   normalizeOrganizationProjectStatus,
   normalizeOrganizationWeekStart,
@@ -78,6 +81,23 @@ test('organization project governance requires both account and organization aut
   assert.equal(canManageOrganizationProjects('admin', ['organization_admin', 'developer']), true)
   assert.equal(canManageOrganizationProjects('member', ['organization_admin']), true)
   assert.equal(canManageOrganizationProjects('admin', ['developer']), false)
+})
+
+test('test-environment maintenance requires organization-admin role and owner/admin membership', () => {
+  assert.equal(canManageTestEnvironments('owner', ['organization_admin']), true)
+  assert.equal(canManageTestEnvironments('admin', ['organization_admin', 'tester']), true)
+  assert.equal(canManageTestEnvironments('member', ['organization_admin']), false)
+  assert.equal(canManageTestEnvironments('owner', ['tester']), false)
+  assert.equal(canManageTestEnvironments(null, ['organization_admin']), false)
+})
+
+test('test-environment fields are bounded and URLs cannot carry credentials or unsafe protocols', () => {
+  assert.equal(normalizeTestEnvironmentName('  预发布  '), '预发布')
+  assert.equal(normalizeTestEnvironmentName('a'.repeat(121)), null)
+  assert.equal(normalizeTestEnvironmentAccessUrl(' https://staging.example.com/app '), 'https://staging.example.com/app')
+  assert.equal(normalizeTestEnvironmentAccessUrl('http://user:pass@example.com'), null)
+  assert.equal(normalizeTestEnvironmentAccessUrl('javascript:alert(1)'), null)
+  assert.equal(normalizeTestEnvironmentAccessUrl('https://example.com/line\nfeed'), null)
 })
 
 test('new organization owners are provisioned as organization administrators', () => {
@@ -201,6 +221,24 @@ test('organization package market policy replaces the legacy association model',
   assert.match(organizationsSource, /package-market\/policy/u)
   assert.match(apiSource, /package-market\/policy/u)
   assert.match(organizationWorkbenchSource, /OrganizationPackageMarketPanel/u)
+})
+
+test('organization test-environment routes validate manager access, organization spaces, and transactions', () => {
+  const routeStart = organizationsSource.indexOf("router.post('/organizations/:organizationId/test-environments'")
+  const routeEnd = organizationsSource.indexOf("router.post('/organizations/:organizationId/projects/:projectId'", routeStart)
+  const routeSource = organizationsSource.slice(routeStart, routeEnd)
+  assert.ok(routeStart >= 0)
+  assert.ok(routeEnd > routeStart)
+  assert.match(routeSource, /requireTestEnvironmentManager/u)
+  assert.match(routeSource, /normalizeTestEnvironmentName/u)
+  assert.match(routeSource, /normalizeTestEnvironmentAccessUrl/u)
+  assert.match(routeSource, /organization_id = \$1 and id = any\(\$2::bigint\[\]\)/u)
+  assert.match(routeSource, /await transaction\(async \(client\)/u)
+  assert.match(routeSource, /encryptText\(name\)/u)
+  assert.match(routeSource, /encryptText\(accessUrl\)/u)
+  assert.match(routeSource, /test_environment_spaces/u)
+  assert.match(routeSource, /on conflict \(test_environment_id, test_space_id\) do nothing/u)
+  assert.match(organizationsSource, /m\.access_role in \('owner', 'admin'\)/u)
 })
 
 test('organization detail omits invitations after the recipient joins', () => {

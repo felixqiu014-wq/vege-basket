@@ -20,8 +20,10 @@ import {
 import { parseTestCaseCsv } from './test-case-import.ts'
 import {
   canDeleteTestCase,
+  canDeleteTestBug,
   canDeleteTestSubject,
   canEditTestBug,
+  canEditTestSpaceVersion,
   canEditTestSubject,
   canDeveloperRejectBug,
   canDeveloperSetBugStatus,
@@ -132,6 +134,14 @@ function text(value: unknown, maxLength: number) {
 function positiveId(value: unknown) {
   const id = Number(value)
   return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+function parseOptionalTestEnvironmentId(value: unknown):
+  | { valid: true; value: number | null }
+  | { valid: false } {
+  if (value == null || value === '') return { valid: true, value: null }
+  const id = positiveId(value)
+  return id ? { valid: true, value: id } : { valid: false }
 }
 
 async function requireAssignedBugOrganizationContext(
@@ -360,6 +370,54 @@ async function requireSpaceOwner(
     return false
   }
   return true
+}
+
+async function getDirectSpaceAccess(spaceId: number, userId: number, client?: PoolClient) {
+  const run = client
+    ? (sql: string, params: unknown[]) => client.query<TestSpaceAccessRow>(sql, params)
+    : (sql: string, params: unknown[]) => query<TestSpaceAccessRow>(sql, params)
+  const result = await run(
+    `select access_level
+       from test_space_memberships
+      where test_space_id = $1 and user_id = $2 and status = 'active'
+      for share`,
+    [spaceId, userId],
+  )
+  return result.rows[0]?.access_level ?? null
+}
+
+async function getAssignedTestEnvironment(
+  environmentId: number,
+  spaceId: number,
+  client?: PoolClient,
+) {
+  const run = client
+    ? (sql: string, params: unknown[]) => client.query<{
+      access_url: string
+      id: string
+      name: string
+    }>(sql, params)
+    : (sql: string, params: unknown[]) => query<{
+      access_url: string
+      id: string
+      name: string
+    }>(sql, params)
+  const result = await run(
+    `select environment.id, environment.name, environment.access_url
+       from test_environments environment
+       join test_environment_spaces assignment
+         on assignment.test_environment_id = environment.id
+        and assignment.test_space_id = $2
+      where environment.id = $1
+      limit 1
+      for share of environment, assignment`,
+    [environmentId, spaceId],
+  )
+  return result.rows[0] ?? null
+}
+
+function environmentSnapshot(name: string, accessUrl: string) {
+  return `${name} (${accessUrl})`.slice(0, 500)
 }
 
 async function lockActiveOrganizationMembership(
@@ -625,6 +683,7 @@ type ImportPlanCaseRow = {
 type ImportBugRow = {
   assignee_user_id: string | null
   id: string
+  test_environment_id: string | null
   test_plan_case_id: string | null
   test_plan_id: string | null
   test_subject_id: string
@@ -758,8 +817,8 @@ async function importTestSpaceData(
         const bugIds = source.bugIds
         const bugs = await client.query<ImportBugRow>(
           bugIds
-            ? `select id, assignee_user_id, test_plan_case_id, test_plan_id, test_subject_id from test_bugs where test_space_id = $1 and id = any($2::bigint[]) for update`
-            : `select id, assignee_user_id, test_plan_case_id, test_plan_id, test_subject_id from test_bugs where test_space_id = $1 for update`,
+            ? `select id, assignee_user_id, test_environment_id, test_plan_case_id, test_plan_id, test_subject_id from test_bugs where test_space_id = $1 and id = any($2::bigint[]) for update`
+            : `select id, assignee_user_id, test_environment_id, test_plan_case_id, test_plan_id, test_subject_id from test_bugs where test_space_id = $1 for update`,
           bugIds ? [source.spaceId, bugIds] : [source.spaceId],
         )
         if (bugIds && bugs.rows.length !== bugIds.length) throw importFailure('Bug 不存在或不属于当前测试空间', 404)
@@ -1041,11 +1100,27 @@ async function importTestSpaceData(
         const targetSubjectId = await copySubject(source.spaceId, Number(bug.test_subject_id))
         const targetPlanId = bug.test_plan_id ? await copyPlan(source.spaceId, Number(bug.test_plan_id)) : null
         const targetPlanCaseId = bug.test_plan_case_id ? planCaseMap.get(`${source.spaceId}:${bug.test_plan_case_id}`) : null
+        let targetEnvironmentId: number | null = null
+        if (bug.test_environment_id) {
+          const assignment = await client.query<{ id: string }>(
+            `select environment.id
+               from test_environments environment
+               join test_environment_spaces assignment
+                 on assignment.test_environment_id = environment.id
+                and assignment.test_space_id = $2
+              where environment.id = $1
+              limit 1`,
+            [Number(bug.test_environment_id), targetSpaceId],
+          )
+          targetEnvironmentId = assignment.rows[0] ? Number(assignment.rows[0].id) : null
+        }
         await client.query(
           `update test_bugs
-           set test_space_id = $1, test_subject_id = $2, test_plan_id = $3, test_plan_case_id = $4, updated_at = now()
-           where id = $5 and test_space_id = $6`,
-          [targetSpaceId, targetSubjectId, targetPlanId, targetPlanCaseId ?? null, Number(bug.id), source.spaceId],
+           set test_space_id = $1, test_subject_id = $2, test_plan_id = $3, test_plan_case_id = $4,
+               test_environment_id = $5, updated_at = now()
+           where id = $6 and test_space_id = $7`,
+          [targetSpaceId, targetSubjectId, targetPlanId, targetPlanCaseId ?? null,
+            targetEnvironmentId, Number(bug.id), source.spaceId],
         )
         await recordTestBugEvent({
           actorUserId: userId,
@@ -1125,6 +1200,7 @@ async function recordTestBugEvent(
 async function getTestWorkbench(userId: number) {
   const [
     spaces,
+    testEnvironments,
     subjects,
     folders,
     cases,
@@ -1153,6 +1229,24 @@ async function getTestWorkbench(userId: number) {
         on tsm.test_space_id = ts.id and tsm.user_id = $1 and tsm.status = 'active'
       where ${testSpaceMembershipPresentSql('tsm')} or ${managedOrganizationReadScopeSql('ts.organization_id')}
       order by ts.updated_at desc, ts.id desc
+      `,
+      [userId],
+    ),
+    query<{
+      access_url: string
+      id: string
+      name: string
+      test_space_id: string
+    }>(
+      `
+      select environment.id, environment.name, environment.access_url, assignment.test_space_id
+      from test_environment_spaces assignment
+      join test_environments environment on environment.id = assignment.test_environment_id
+      join test_spaces space on space.id = assignment.test_space_id
+      left join test_space_memberships mine
+        on mine.test_space_id = space.id and mine.user_id = $1 and mine.status = 'active'
+      where ${testSpaceMembershipPresentSql('mine')} or ${managedOrganizationReadScopeSql('space.organization_id')}
+      order by environment.id, assignment.test_space_id
       `,
       [userId],
     ),
@@ -1303,7 +1397,11 @@ async function getTestWorkbench(userId: number) {
       reporter_user_id: string | null
       reproduction_steps: string
       severity: string
+      space_owner_user_id: string
       status: BugStatus
+      test_environment_access_url: string | null
+      test_environment_id: string | null
+      test_environment_name: string | null
       test_plan_case_id: string | null
       test_plan_id: string | null
       test_space_id: string
@@ -1313,13 +1411,17 @@ async function getTestWorkbench(userId: number) {
       test_plan_name: string | null
       title: string
       updated_at: Date
+      direct_access_level: TestSpaceAccess | null
       organization_admin_access: boolean
     }>(
       `
-      select b.*,
+      select b.*, space.owner_user_id as space_owner_user_id,
+        m.access_level as direct_access_level,
         space.name as test_space_name,
         subject.name as test_subject_name,
         plan.name as test_plan_name,
+        environment.name as test_environment_name,
+        environment.access_url as test_environment_access_url,
         reporter.display_name as reporter_display_name, reporter.email as reporter_email,
         assignee.display_name as assignee_display_name, assignee.email as assignee_email,
         ${managedOrganizationReadScopeSql('space.organization_id')} as organization_admin_access
@@ -1327,6 +1429,7 @@ async function getTestWorkbench(userId: number) {
       join test_spaces space on space.id = b.test_space_id
       join test_subjects subject on subject.id = b.test_subject_id
       left join test_plans plan on plan.id = b.test_plan_id
+      left join test_environments environment on environment.id = b.test_environment_id
       left join test_space_memberships m
         on m.test_space_id = b.test_space_id and m.user_id = $1 and m.status = 'active'
       left join users reporter on reporter.id = b.reporter_user_id
@@ -1551,6 +1654,23 @@ async function getTestWorkbench(userId: number) {
     subjectIdsByPlan.set(planId, [...(subjectIdsByPlan.get(planId) ?? []), Number(row.test_subject_id)])
   }
   const ownedSpaces = spaces.rows.filter((row) => Number(row.owner_user_id) === userId)
+  const testEnvironmentsById = new Map<number, {
+    accessUrl: string
+    id: number
+    name: string
+    testSpaceIds: number[]
+  }>()
+  for (const row of testEnvironments.rows) {
+    const id = Number(row.id)
+    const environment = testEnvironmentsById.get(id) ?? {
+      accessUrl: decryptText(row.access_url),
+      id,
+      name: decryptText(row.name),
+      testSpaceIds: [],
+    }
+    environment.testSpaceIds.push(Number(row.test_space_id))
+    testEnvironmentsById.set(id, environment)
+  }
   const departedUserIds = await getDepartedUserIds()
 
   return {
@@ -1560,7 +1680,16 @@ async function getTestWorkbench(userId: number) {
       assigneeName: row.assignee_display_name || row.assignee_email || undefined,
       assigneeUserId: row.assignee_user_id ? Number(row.assignee_user_id) : undefined,
       assigneeTransferSource: assigneeTransferSourceByBug.get(Number(row.id)),
+      canDelete: Boolean(row.direct_access_level) && canDeleteTestBug(
+        row.reporter_user_id ? Number(row.reporter_user_id) : null,
+        userId,
+      ),
       canEdit: canEditTestBug(row.reporter_user_id ? Number(row.reporter_user_id) : null, userId),
+      canEditSpaceVersion: Boolean(row.direct_access_level) && canEditTestSpaceVersion(
+        Number(row.space_owner_user_id),
+        row.reporter_user_id ? Number(row.reporter_user_id) : null,
+        userId,
+      ),
       canShare: canEditTestBug(row.reporter_user_id ? Number(row.reporter_user_id) : null, userId)
         || Number(row.assignee_user_id) === userId
         || Boolean(row.organization_admin_access),
@@ -1577,6 +1706,13 @@ async function getTestWorkbench(userId: number) {
       reproductionSteps: decryptText(row.reproduction_steps),
       severity: row.severity,
       status: row.status,
+      testEnvironmentAccessUrl: row.test_environment_access_url
+        ? decryptText(row.test_environment_access_url)
+        : undefined,
+      testEnvironmentId: row.test_environment_id ? Number(row.test_environment_id) : undefined,
+      testEnvironmentName: row.test_environment_name
+        ? decryptText(row.test_environment_name)
+        : undefined,
       testPlanCaseId: row.test_plan_case_id ? Number(row.test_plan_case_id) : undefined,
       testPlanId: row.test_plan_id ? Number(row.test_plan_id) : undefined,
       testPlanName: row.test_plan_name ? decryptText(row.test_plan_name) : undefined,
@@ -1680,6 +1816,7 @@ async function getTestWorkbench(userId: number) {
       ownerUserId: Number(row.owner_user_id),
       versionLabel: row.version_label ? decryptText(row.version_label) : undefined,
     })),
+    testEnvironments: Array.from(testEnvironmentsById.values()),
     subjects: subjects.rows.map((row) => ({
       canDelete: canDeleteTestSubject(row.created_by_user_id ? Number(row.created_by_user_id) : null, userId),
       canEdit: canEditTestSubject(row.created_by_user_id ? Number(row.created_by_user_id) : null, userId),
@@ -1828,6 +1965,14 @@ router.patch('/test-spaces/:spaceId', asyncRoute(async (request, response) => {
        where id = $4 and owner_user_id = $5`,
       [encryptText(name), versionLabel ? encryptText(versionLabel) : null, nextOrganizationId, spaceId, session.userId],
     )
+    if (organizationChanged) {
+      // Environment assignments are organization-scoped. The composite Bug FK
+      // clears any linked Bug environment when an assignment is removed.
+      await client.query(
+        'delete from test_environment_spaces where test_space_id = $1',
+        [spaceId],
+      )
+    }
     if (organizationChanged && nextOrganizationId !== null) {
       await client.query(
         `update test_space_invite_links set revoked_at = now()
@@ -1843,6 +1988,62 @@ router.patch('/test-spaces/:spaceId', asyncRoute(async (request, response) => {
     client.release()
   }
   response.json(await getTestSpaceSettings(session.userId))
+}))
+
+router.patch('/test-spaces/:spaceId/version', asyncRoute(async (request, response) => {
+  const session = await requireActiveRole(request, response, 'tester')
+  if (!session) return
+  const spaceId = positiveId(request.params.spaceId)
+  const hasVersionLabel = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'versionLabel')
+  const versionLabel = text(request.body?.versionLabel, 80)
+  if (!spaceId || !hasVersionLabel) {
+    response.status(400).json({ error: 'Valid test space and version are required' })
+    return
+  }
+  try {
+    await transaction(async (client) => {
+      const locked = await client.query<{
+        owner_user_id: string
+      }>(
+        `
+        select space.owner_user_id
+        from test_spaces space
+        where space.id = $1
+        for update of space
+        `,
+        [spaceId, session.userId],
+      )
+      const space = locked.rows[0]
+      if (!space || !(await getDirectSpaceAccess(spaceId, session.userId, client))) {
+        throw importFailure('Test space not found', 404)
+      }
+      const createdBug = await client.query<{ id: string }>(
+        `select id
+           from test_bugs
+          where test_space_id = $1 and reporter_user_id = $2
+          limit 1
+          for share`,
+        [spaceId, session.userId],
+      )
+      const bugReporterUserId = createdBug.rows[0] ? session.userId : null
+      if (!canEditTestSpaceVersion(Number(space.owner_user_id), bugReporterUserId, session.userId)) {
+        throw importFailure('Only the test-space owner or a Bug creator can edit the space version', 403)
+      }
+      await client.query(
+        `update test_spaces
+         set version_label = $1, updated_at = now()
+         where id = $2`,
+        [versionLabel ? encryptText(versionLabel) : null, spaceId],
+      )
+    })
+  } catch (error) {
+    if (error instanceof Error && 'status' in error) {
+      response.status(Number((error as Error & { status: number }).status)).json({ error: error.message })
+      return
+    }
+    throw error
+  }
+  response.json(await getTestWorkbench(session.userId))
 }))
 
 router.delete('/test-spaces/:spaceId', asyncRoute(async (request, response) => {
@@ -3228,111 +3429,149 @@ router.post('/test-spaces/:spaceId/bugs', asyncRoute(async (request, response) =
   if (!(await requireSpaceAccess(response, spaceId, session.userId, true))) return
   const subjectId = positiveId(request.body.testSubjectId)
   const title = text(request.body.title, 160)
-  let planId = positiveId(request.body.testPlanId)
+  const requestedPlanId = positiveId(request.body.testPlanId)
   const planCaseId = positiveId(request.body.testPlanCaseId)
+  const hasTestEnvironmentId = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'testEnvironmentId')
+  const requestedEnvironment = hasTestEnvironmentId
+    ? parseOptionalTestEnvironmentId(request.body.testEnvironmentId)
+    : { valid: true as const, value: null }
   if (!subjectId || !title) {
     response.status(400).json({ error: 'Bug title and test subject are required' })
     return
   }
-  const subject = await query('select id from test_subjects where id = $1 and test_space_id = $2', [subjectId, spaceId])
-  if (!subject.rows[0]) {
-    response.status(404).json({ error: 'Test subject not found' })
+  if (!requestedEnvironment.valid) {
+    response.status(400).json({ error: 'Test environment must be valid' })
     return
-  }
-  if (planCaseId) {
-    const execution = await query<{ test_plan_id: string; test_subject_id: string | null }>(
-      `
-      select pc.test_plan_id, coalesce(pc.test_subject_id, c.test_subject_id) as test_subject_id
-      from test_plan_cases pc
-      join test_plans p on p.id = pc.test_plan_id
-      left join test_cases c on c.id = pc.test_case_id
-      where pc.id = $1 and p.test_space_id = $2
-      `,
-      [planCaseId, spaceId],
-    )
-    if (
-      !execution.rows[0] ||
-      (planId && Number(execution.rows[0].test_plan_id) !== planId) ||
-      Number(execution.rows[0].test_subject_id) !== subjectId
-    ) {
-      response.status(400).json({ error: 'Linked plan execution is invalid' })
-      return
-    }
-    planId = Number(execution.rows[0].test_plan_id)
-  }
-  if (planId && !planCaseId) {
-    const plan = await query(
-      `
-      select p.id
-      from test_plans p
-      join test_plan_subjects ps on ps.test_plan_id = p.id
-      where p.id = $1 and p.test_space_id = $2 and ps.test_subject_id = $3
-      `,
-      [planId, spaceId, subjectId],
-    )
-    if (!plan.rows[0]) {
-      response.status(400).json({ error: 'Linked test plan is invalid' })
-      return
-    }
   }
   const severity = ['blocker', 'critical', 'major', 'minor', 'trivial'].includes(request.body.severity)
     ? request.body.severity
     : 'major'
   const priority = ['high', 'medium', 'low'].includes(request.body.priority) ? request.body.priority : 'medium'
   const assigneeUserId = positiveId(request.body.assigneeUserId)
-  if (!(await userCanBeAssignedInSpace(assigneeUserId, spaceId!, 'developer'))) {
-    response.status(400).json({ error: 'Bug assignee must be a developer in this test space' })
-    return
-  }
-  const status = assigneeUserId ? 'pending_confirmation' : 'new'
-  const insertedBug = await query<{ id: string }>(
-    `
-    insert into test_bugs
-      (test_space_id, test_subject_id, test_plan_id, test_plan_case_id, title, severity, priority,
-       status, environment, reproduction_steps, expected_result, actual_result, reporter_user_id, assignee_user_id)
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-    returning id
-    `,
-    [
-      spaceId,
-      subjectId,
-      planId,
-      planCaseId,
-      encryptText(title),
-      severity,
-      priority,
-      status,
-      encryptText(text(request.body.environment, 500)),
-      encryptText(text(request.body.reproductionSteps, 10000)),
-      encryptText(text(request.body.expectedResult, 10000)),
-      encryptText(text(request.body.actualResult, 10000)),
-      session.userId,
-      assigneeUserId,
-    ],
-  )
-  if (insertedBug.rows[0]) {
-    const bugId = Number(insertedBug.rows[0].id)
-    await recordTestBugEvent({
-      actorUserId: session.userId,
-      bugId,
-      eventType: 'created',
-      nextStatus: status,
-    })
-    if (assigneeUserId) {
+  const status: BugStatus = assigneeUserId ? 'pending_confirmation' : 'new'
+  let assignedNotification: TestBugAssignedEvent | null = null
+  try {
+    await transaction(async (client) => {
+      const subject = await client.query<{ id: string }>(
+        `select id from test_subjects where id = $1 and test_space_id = $2 for share`,
+        [subjectId, spaceId],
+      )
+      if (!subject.rows[0]) throw importFailure('Test subject not found', 404)
+
+      let planId = requestedPlanId
+      if (planCaseId) {
+        const execution = await client.query<{ test_plan_id: string; test_subject_id: string | null }>(
+          `
+          select pc.test_plan_id, coalesce(pc.test_subject_id, c.test_subject_id) as test_subject_id
+          from test_plan_cases pc
+          join test_plans p on p.id = pc.test_plan_id
+          left join test_cases c on c.id = pc.test_case_id
+          where pc.id = $1 and p.test_space_id = $2
+          for share of pc, p
+          `,
+          [planCaseId, spaceId],
+        )
+        if (
+          !execution.rows[0] ||
+          (planId && Number(execution.rows[0].test_plan_id) !== planId) ||
+          Number(execution.rows[0].test_subject_id) !== subjectId
+        ) {
+          throw importFailure('Linked plan execution is invalid', 400)
+        }
+        planId = Number(execution.rows[0].test_plan_id)
+      }
+      if (planId && !planCaseId) {
+        const plan = await client.query<{ id: string }>(
+          `
+          select p.id
+          from test_plans p
+          join test_plan_subjects ps on ps.test_plan_id = p.id
+          where p.id = $1 and p.test_space_id = $2 and ps.test_subject_id = $3
+          for share of p
+          `,
+          [planId, spaceId, subjectId],
+        )
+        if (!plan.rows[0]) throw importFailure('Linked test plan is invalid', 400)
+      }
+      if (!(await userCanBeAssignedInSpace(assigneeUserId, spaceId!, 'developer', client))) {
+        throw importFailure('Bug assignee must be a developer in this test space', 400)
+      }
+
+      let environmentId: number | null = null
+      let environment = text(request.body.environment, 500)
+      if (hasTestEnvironmentId && requestedEnvironment.value) {
+        const configuredEnvironment = await getAssignedTestEnvironment(
+          requestedEnvironment.value,
+          spaceId!,
+          client,
+        )
+        if (!configuredEnvironment) {
+          throw importFailure('Test environment is not configured for this test space', 400)
+        }
+        environmentId = Number(configuredEnvironment.id)
+        environment = environmentSnapshot(
+          decryptText(configuredEnvironment.name),
+          decryptText(configuredEnvironment.access_url),
+        )
+      }
+
+      const inserted = await client.query<{ id: string }>(
+        `
+        insert into test_bugs
+          (test_space_id, test_subject_id, test_plan_id, test_plan_case_id, test_environment_id,
+           title, severity, priority, status, environment, reproduction_steps, expected_result,
+           actual_result, reporter_user_id, assignee_user_id)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        returning id
+        `,
+        [
+          spaceId,
+          subjectId,
+          planId,
+          planCaseId,
+          environmentId,
+          encryptText(title),
+          severity,
+          priority,
+          status,
+          encryptText(environment),
+          encryptText(text(request.body.reproductionSteps, 10000)),
+          encryptText(text(request.body.expectedResult, 10000)),
+          encryptText(text(request.body.actualResult, 10000)),
+          session.userId,
+          assigneeUserId,
+        ],
+      )
+      const bugId = Number(inserted.rows[0].id)
       await recordTestBugEvent({
         actorUserId: session.userId,
-        assigneeUserId,
         bugId,
-        eventType: 'assigned',
-      })
-      onTestBugAssigned({
-        actorUserId: session.userId,
-        assigneeUserId,
-        assignmentKind: 'created',
-        bugId,
-      })
+        eventType: 'created',
+        nextStatus: status,
+      }, client)
+      if (assigneeUserId) {
+        await recordTestBugEvent({
+          actorUserId: session.userId,
+          assigneeUserId,
+          bugId,
+          eventType: 'assigned',
+        }, client)
+        assignedNotification = {
+          actorUserId: session.userId,
+          assigneeUserId,
+          assignmentKind: 'created',
+          bugId,
+        }
+      }
+    })
+  } catch (error) {
+    if (error instanceof Error && 'status' in error) {
+      response.status(Number((error as Error & { status: number }).status)).json({ error: error.message })
+      return
     }
+    throw error
   }
+  if (assignedNotification) onTestBugAssigned(assignedNotification)
   response.status(201).json(await getTestWorkbench(session.userId))
 }))
 
@@ -3368,6 +3607,7 @@ router.patch('/test-spaces/:spaceId/bugs/:bugId', asyncRoute(async (request, res
     actual_result: string
     assignee_user_id: string | null
     environment: string
+    test_environment_id: string | null
     expected_result: string
     priority: string
     reporter_user_id: string | null
@@ -3377,7 +3617,7 @@ router.patch('/test-spaces/:spaceId/bugs/:bugId', asyncRoute(async (request, res
     title: string
   }>(
     `select status, assignee_user_id, reporter_user_id, title, severity, priority,
-            environment, reproduction_steps, expected_result, actual_result
+            environment, test_environment_id, reproduction_steps, expected_result, actual_result
        from test_bugs where id = $1 and test_space_id = $2`,
     [bugId, spaceId],
   )
@@ -3391,6 +3631,7 @@ router.patch('/test-spaces/:spaceId/bugs/:bugId', asyncRoute(async (request, res
     'severity',
     'priority',
     'environment',
+    'testEnvironmentId',
     'reproductionSteps',
     'expectedResult',
     'actualResult',
@@ -3415,73 +3656,195 @@ router.patch('/test-spaces/:spaceId/bugs/:bugId', asyncRoute(async (request, res
     response.status(400).json({ error: 'Bug severity or priority is invalid' })
     return
   }
-  const status = isBugStatus(request.body.status) ? request.body.status : current.rows[0].status
   const assigneeUserId = request.body.assigneeUserId === undefined
     ? currentBug.assignee_user_id
     : positiveId(request.body.assigneeUserId)
   const normalizedAssigneeUserId = assigneeUserId ? Number(assigneeUserId) : null
-  const previousAssigneeUserId = currentBug.assignee_user_id
-    ? Number(currentBug.assignee_user_id)
-    : null
   if (!(await userCanBeAssignedInSpace(normalizedAssigneeUserId, spaceId!, 'developer'))) {
     response.status(400).json({ error: 'Bug assignee must be a developer in this test space' })
     return
   }
-  await query(
-    `update test_bugs set title = $1, severity = $2, priority = $3, environment = $4,
-            reproduction_steps = $5, expected_result = $6, actual_result = $7,
-            status = $8, assignee_user_id = $9, updated_at = now()
-       where id = $10 and test_space_id = $11`,
-    [
-      request.body.title === undefined ? currentBug.title : encryptText(title),
-      severity,
-      priority,
-      request.body.environment === undefined ? currentBug.environment : encryptText(text(request.body.environment, 500)),
-      request.body.reproductionSteps === undefined ? currentBug.reproduction_steps : encryptText(text(request.body.reproductionSteps, 10000)),
-      request.body.expectedResult === undefined ? currentBug.expected_result : encryptText(text(request.body.expectedResult, 10000)),
-      request.body.actualResult === undefined ? currentBug.actual_result : encryptText(text(request.body.actualResult, 10000)),
-      status,
-      normalizedAssigneeUserId,
-      bugId,
-      spaceId,
-    ],
-  )
-  if (
-    normalizedAssigneeUserId &&
-    normalizedAssigneeUserId !== previousAssigneeUserId
-  ) {
-    await recordTestBugEvent({
-      actorUserId: session.userId,
-      assigneeUserId: normalizedAssigneeUserId,
-      bugId,
-      eventType: 'assigned',
-    })
-    onTestBugAssigned({
-      actorUserId: session.userId,
-      assigneeUserId: normalizedAssigneeUserId,
-      assignmentKind: 'assigned',
-      bugId,
-    })
+  const hasEnvironmentId = Object.prototype.hasOwnProperty.call(request.body ?? {}, 'testEnvironmentId')
+  const environmentInput = hasEnvironmentId
+    ? parseOptionalTestEnvironmentId(request.body.testEnvironmentId)
+    : { valid: true as const, value: null }
+  if (!environmentInput.valid) {
+    response.status(400).json({ error: 'Test environment must be valid' })
+    return
   }
-  if (status !== currentBug.status) {
-    await recordTestBugEvent({
-      actorUserId: session.userId,
-      bugId,
-      eventType: 'status_changed',
-      nextStatus: status,
-      previousStatus: currentBug.status,
+  let assignedNotification: TestBugAssignedEvent | null = null
+  let statusNotification: TestBugStatusChangedEvent | null = null
+  try {
+    await transaction(async (client) => {
+      const locked = await client.query<{
+        actual_result: string
+        assignee_user_id: string | null
+        environment: string
+        expected_result: string
+        reproduction_steps: string
+        reporter_user_id: string | null
+        severity: string
+        status: BugStatus
+        test_environment_id: string | null
+        title: string
+      }>(
+        `select status, assignee_user_id, reporter_user_id, title, severity, priority,
+                environment, test_environment_id, reproduction_steps, expected_result, actual_result
+           from test_bugs where id = $1 and test_space_id = $2 for update`,
+        [bugId, spaceId],
+      )
+      const lockedBug = locked.rows[0]
+      if (!lockedBug) throw importFailure('Bug not found', 404)
+      const lockedReporter = lockedBug.reporter_user_id ? Number(lockedBug.reporter_user_id) : null
+      if (hasDetailEdit && !canEditTestBug(lockedReporter, session.userId)) {
+        throw importFailure('Only the Bug creator can edit its details', 403)
+      }
+      const nextEnvironmentId = hasEnvironmentId
+        ? environmentInput.value
+        // A manual legacy text edit must not leave a stale configured link.
+        : request.body.environment !== undefined
+          ? null
+          : (lockedBug.test_environment_id ? Number(lockedBug.test_environment_id) : null)
+      let nextEnvironment = request.body.environment === undefined
+        ? lockedBug.environment
+        : encryptText(text(request.body.environment, 500))
+      if (hasEnvironmentId) {
+        if (nextEnvironmentId) {
+          const configured = await getAssignedTestEnvironment(nextEnvironmentId, spaceId!, client)
+          if (!configured) throw importFailure('Test environment is not configured for this test space', 400)
+          nextEnvironment = encryptText(environmentSnapshot(
+            decryptText(configured.name),
+            decryptText(configured.access_url),
+          ))
+        } else if (request.body.environment === undefined) {
+          nextEnvironment = encryptText('')
+        }
+      }
+      const nextTitle = request.body.title === undefined ? lockedBug.title : encryptText(title)
+      const nextReproduction = request.body.reproductionSteps === undefined
+        ? lockedBug.reproduction_steps
+        : encryptText(text(request.body.reproductionSteps, 10000))
+      const nextExpected = request.body.expectedResult === undefined
+        ? lockedBug.expected_result
+        : encryptText(text(request.body.expectedResult, 10000))
+      const nextActual = request.body.actualResult === undefined
+        ? lockedBug.actual_result
+        : encryptText(text(request.body.actualResult, 10000))
+      const lockedPreviousAssignee = lockedBug.assignee_user_id ? Number(lockedBug.assignee_user_id) : null
+      const lockedStatus = isBugStatus(request.body.status) ? request.body.status : lockedBug.status
+      if (!(await userCanBeAssignedInSpace(normalizedAssigneeUserId, spaceId!, 'developer', client))) {
+        throw importFailure('Bug assignee must be a developer in this test space', 400)
+      }
+      await client.query(
+        `update test_bugs set title = $1, severity = $2, priority = $3, environment = $4,
+                test_environment_id = $5, reproduction_steps = $6, expected_result = $7,
+                actual_result = $8, status = $9, assignee_user_id = $10, updated_at = now()
+           where id = $11 and test_space_id = $12`,
+        [nextTitle, severity, priority, nextEnvironment, nextEnvironmentId, nextReproduction,
+          nextExpected, nextActual, lockedStatus, normalizedAssigneeUserId, bugId, spaceId],
+      )
+      if (normalizedAssigneeUserId && normalizedAssigneeUserId !== lockedPreviousAssignee) {
+        await recordTestBugEvent({
+          actorUserId: session.userId,
+          assigneeUserId: normalizedAssigneeUserId,
+          bugId,
+          eventType: 'assigned',
+        }, client)
+        assignedNotification = {
+          actorUserId: session.userId,
+          assigneeUserId: normalizedAssigneeUserId,
+          assignmentKind: 'assigned',
+          bugId,
+        }
+      }
+      if (lockedStatus !== lockedBug.status) {
+        await recordTestBugEvent({
+          actorUserId: session.userId,
+          bugId,
+          eventType: 'status_changed',
+          nextStatus: lockedStatus,
+          previousStatus: lockedBug.status,
+        }, client)
+        if (
+          lockedStatus === 'pending_verification' ||
+          (lockedStatus === 'pending_confirmation' && lockedBug.status !== 'new')
+        ) {
+          statusNotification = {
+            actorUserId: session.userId,
+            bugId,
+            nextStatus: lockedStatus,
+            previousStatus: lockedBug.status,
+          }
+        }
+      }
     })
+  } catch (error) {
+    if (error instanceof Error && 'status' in error) {
+      response.status(Number((error as Error & { status: number }).status)).json({ error: error.message })
+      return
+    }
+    throw error
   }
-  if (
-    status !== currentBug.status &&
-    (status === 'pending_verification' || (status === 'pending_confirmation' && currentBug.status !== 'new'))
-  ) {
-    onTestBugStatusChanged({
-      actorUserId: session.userId,
-      bugId,
-      nextStatus: status,
-      previousStatus: currentBug.status,
+  if (assignedNotification) onTestBugAssigned(assignedNotification)
+  if (statusNotification) onTestBugStatusChanged(statusNotification)
+  response.json(await getTestWorkbench(session.userId))
+}))
+
+router.delete('/test-spaces/:spaceId/bugs/:bugId', asyncRoute(async (request, response) => {
+  const session = await requireActiveRole(request, response, 'tester')
+  if (!session) return
+  const spaceId = positiveId(request.params.spaceId)
+  const bugId = positiveId(request.params.bugId)
+  // A creator may delete from a read-only membership, but must still be a
+  // direct active member; managed organization read access is insufficient.
+  if (!spaceId || !bugId) {
+    response.status(400).json({ error: 'Valid test space and Bug are required' })
+    return
+  }
+  try {
+    await transaction(async (client) => {
+      // Recheck direct membership under the mutation transaction so a
+      // concurrent membership removal cannot turn a stale read into access.
+      if (!(await getDirectSpaceAccess(spaceId, session.userId, client))) {
+        throw importFailure('Test space not found', 404)
+      }
+      const locked = await client.query<{ reporter_user_id: string | null }>(
+        `select reporter_user_id
+           from test_bugs
+          where id = $1 and test_space_id = $2
+          for update`,
+        [bugId, spaceId],
+      )
+      const bug = locked.rows[0]
+      if (!bug) throw importFailure('Bug not found', 404)
+      if (!canDeleteTestBug(bug.reporter_user_id ? Number(bug.reporter_user_id) : null, session.userId)) {
+        throw importFailure('Only the Bug creator can delete it', 403)
+      }
+      const comments = await client.query<{ id: string }>(
+        'select id from test_bug_comments where test_bug_id = $1',
+        [bugId],
+      )
+      const commentIds = comments.rows.map((row) => Number(row.id))
+      await client.query(
+        `delete from notification_deliveries
+          where (kind in ('test_bug_assigned', 'test_bug_status_changed', 'test_bug_rejected') and source_id = $1)
+             or (kind = 'test_bug_comment_added' and source_id = any($2::bigint[]))`,
+        [bugId, commentIds],
+      )
+      await client.query(
+        `delete from notification_states
+          where (kind in ('test_bug_assigned', 'test_bug_status_changed', 'test_bug_rejected') and source_id = $1)
+             or (kind = 'test_bug_comment_added' and source_id = any($2::bigint[]))`,
+        [bugId, commentIds],
+      )
+      await client.query('delete from test_bugs where id = $1 and test_space_id = $2', [bugId, spaceId])
     })
+  } catch (error) {
+    if (error instanceof Error && 'status' in error) {
+      response.status(Number((error as Error & { status: number }).status)).json({ error: error.message })
+      return
+    }
+    throw error
   }
   response.json(await getTestWorkbench(session.userId))
 }))

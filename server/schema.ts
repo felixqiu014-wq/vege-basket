@@ -1579,6 +1579,27 @@ alter table test_spaces
   add column if not exists organization_id bigint references organizations(id) on delete restrict,
   add column if not exists version_label text;
 
+-- Test environments are organization-owned reusable endpoints. The human-facing
+-- fields are encrypted by the application; name_lookup is a keyed blind index
+-- used only for uniqueness checks and never exposes the clear-text name.
+create table if not exists test_environments (
+  id bigserial primary key,
+  organization_id bigint not null references organizations(id) on delete cascade,
+  name text not null,
+  name_lookup text not null,
+  access_url text not null,
+  created_by_user_id bigint references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists test_environment_spaces (
+  test_environment_id bigint not null references test_environments(id) on delete cascade,
+  test_space_id bigint not null references test_spaces(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (test_environment_id, test_space_id)
+);
+
 create table if not exists test_space_memberships (
   test_space_id bigint not null references test_spaces(id) on delete cascade,
   user_id bigint not null references users(id) on delete cascade,
@@ -1843,6 +1864,7 @@ create table if not exists test_bugs (
   test_subject_id bigint not null,
   test_plan_id bigint references test_plans(id),
   test_plan_case_id bigint references test_plan_cases(id),
+  test_environment_id bigint references test_environments(id) on delete set null,
   title text not null,
   severity text not null default 'major'
     check (severity in ('blocker', 'critical', 'major', 'minor', 'trivial')),
@@ -1893,6 +1915,40 @@ where status = 'duplicate';
 alter table test_bugs
   add constraint test_bugs_status_check
   check (status in ('new', 'pending_confirmation', 'assigned', 'in_progress', 'pending_verification', 'closed', 'rejected'));
+
+alter table test_bugs
+  add column if not exists test_environment_id bigint references test_environments(id) on delete set null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'test_bugs_test_environment_id_fkey'
+      and conrelid = 'test_bugs'::regclass
+  ) then
+    alter table test_bugs
+      add constraint test_bugs_test_environment_id_fkey
+      foreign key (test_environment_id)
+      references test_environments(id) on delete set null;
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'test_bugs_environment_space_fkey'
+      and conrelid = 'test_bugs'::regclass
+  ) then
+    alter table test_bugs
+      add constraint test_bugs_environment_space_fkey
+      foreign key (test_environment_id, test_space_id)
+      references test_environment_spaces(test_environment_id, test_space_id)
+      on delete set null (test_environment_id);
+  end if;
+end $$;
 
 create table if not exists test_bug_comments (
   id bigserial primary key,
@@ -2235,6 +2291,17 @@ create index if not exists idx_test_bugs_space_status
   on test_bugs(test_space_id, status, updated_at desc);
 create index if not exists idx_test_bugs_assignee_id
   on test_bugs(assignee_user_id, status, updated_at desc);
+create index if not exists idx_test_bugs_environment_id
+  on test_bugs(test_environment_id, updated_at desc)
+  where test_environment_id is not null;
+create index if not exists idx_test_environments_organization_id
+  on test_environments(organization_id, updated_at desc);
+create unique index if not exists idx_test_environments_organization_name_lookup
+  on test_environments(organization_id, name_lookup);
+create index if not exists idx_test_environment_spaces_space_id
+  on test_environment_spaces(test_space_id, test_environment_id);
+create index if not exists idx_test_environment_spaces_environment_id
+  on test_environment_spaces(test_environment_id, test_space_id);
 create index if not exists idx_test_spaces_organization_id on test_spaces(organization_id);
 create index if not exists idx_test_bug_comments_bug_id
   on test_bug_comments(test_bug_id, created_at);

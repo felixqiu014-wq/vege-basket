@@ -78,6 +78,16 @@ export type OrganizationTestSpace = {
   name: string
   ownerName: string
   planCount: number
+  versionLabel?: string
+  updatedAt: string
+}
+
+export type OrganizationTestEnvironment = {
+  accessUrl: string
+  createdAt: string
+  id: number
+  name: string
+  testSpaceIds: number[]
   updatedAt: string
 }
 
@@ -175,6 +185,7 @@ export type OrganizationDetail = {
   attachableTestSpaces: Array<{ id: number; name: string }>
   canManage: boolean
   canManageProjects: boolean
+  canManageTestEnvironments: boolean
   canManageWeeklyReports: boolean
   createdAt: string
   departedUserIds: number[]
@@ -194,6 +205,7 @@ export type OrganizationDetail = {
   reports: OrganizationWeeklyReport[]
   summaries: OrganizationWeeklySummary[]
   tasks: OrganizationTask[]
+  testEnvironments: OrganizationTestEnvironment[]
   testSpaces: OrganizationTestSpace[]
   weeklyReportRules: WeeklyReportRules
   weekStartsOn: number

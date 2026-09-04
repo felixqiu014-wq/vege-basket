@@ -12,6 +12,7 @@ import {
   FolderSimple,
   GearSix,
   Heartbeat,
+  LinkSimple,
   PencilSimple,
   PaperPlaneTilt,
   Package as PackageIcon,
@@ -25,11 +26,13 @@ import {
 import {
   attachProjectToOrganization,
   attachTestSpaceToOrganization,
+  createOrganizationTestEnvironment,
   createProject,
   createOrganizationInviteLink,
   createOrganizationProjectMilestone,
   createOrganization,
   deleteOrganization,
+  deleteOrganizationTestEnvironment,
   fetchOrganization,
   fetchOrganizationPackageMarketCatalog,
   fetchOrganizations,
@@ -42,6 +45,7 @@ import {
   remindWeeklyReportMembers,
   saveOrganizationWeeklyReport,
   updateOrganization,
+  updateOrganizationTestEnvironment,
   updateOrganizationPackageMarketPolicy,
   updateOrganizationWeeklyReportRules,
   updateOrganizationMemberRole,
@@ -60,6 +64,7 @@ import type {
   OrganizationProjectMilestoneStatus,
   OrganizationProjectStatus,
   OrganizationTask,
+  OrganizationTestEnvironment,
   OrganizationPackageMarketCatalogRule,
   WeeklyReportCollection,
   WeeklyReportRules,
@@ -76,6 +81,7 @@ import {
 } from '../../shared/weekly-report-availability'
 import { userRoleLabel } from '../user-roles'
 import { Button } from './ui/button'
+import { Checkbox } from './ui/checkbox'
 import {
   Dialog,
   DialogClose,
@@ -102,7 +108,7 @@ import { UserName } from './user-name'
 import { OrganizationPackageMarketPanel } from './organization-package-market-panel'
 import './organization-workbench.css'
 
-type OrganizationTab = 'overview' | 'projects' | 'testSpaces' | 'members' | 'reports' | 'packageMarket'
+type OrganizationTab = 'overview' | 'projects' | 'testSpaces' | 'testEnvironments' | 'members' | 'reports' | 'packageMarket'
 
 const organizationTabs: Array<{
   icon: typeof Buildings
@@ -112,6 +118,7 @@ const organizationTabs: Array<{
   { icon: Buildings, id: 'overview', label: '概览' },
   { icon: FolderSimple, id: 'projects', label: '项目管理' },
   { icon: Flask, id: 'testSpaces', label: '测试空间管理' },
+  { icon: Target, id: 'testEnvironments', label: '测试环境' },
   { icon: Users, id: 'members', label: '成员' },
   { icon: Sparkle, id: 'reports', label: '周报' },
   { icon: PackageIcon, id: 'packageMarket', label: '安装包市场' },
@@ -1134,6 +1141,14 @@ export function OrganizationWorkbench({
           </section>
         ) : null}
 
+        {tab === 'testEnvironments' ? (
+          <OrganizationTestEnvironmentPanel
+            busy={busy}
+            detail={detail}
+            onMutate={mutate}
+          />
+        ) : null}
+
         {tab === 'members' ? (
           <section className="organization-section organization-members-section">
             <header>
@@ -1488,6 +1503,176 @@ export function OrganizationWorkbench({
         ) : null}
       </div>
     </div>
+  )
+}
+
+function OrganizationTestEnvironmentPanel({ busy, detail, onMutate }: {
+  busy: boolean
+  detail: OrganizationDetail
+  onMutate: (operation: () => Promise<OrganizationDetail>) => Promise<boolean>
+}) {
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editingEnvironment, setEditingEnvironment] = useState<OrganizationTestEnvironment>()
+  const [deleteTarget, setDeleteTarget] = useState<OrganizationTestEnvironment>()
+  const environments = detail.testEnvironments ?? []
+
+  function openCreate() {
+    setEditingEnvironment(undefined)
+    setEditorOpen(true)
+  }
+
+  function openEdit(environment: OrganizationTestEnvironment) {
+    setEditingEnvironment(environment)
+    setEditorOpen(true)
+  }
+
+  return (
+    <section className="organization-section organization-resource-panel organization-test-environments-panel">
+      <header>
+        <div className="organization-section-heading">
+          <h3>测试环境</h3>
+          <span>{environments.length}</span>
+        </div>
+        {detail.canManageTestEnvironments ? (
+          <Button disabled={busy} type="button" onClick={openCreate}><Plus size={16} /> 新建环境</Button>
+        ) : null}
+      </header>
+      {detail.canManageTestEnvironments ? (
+        <p className="organization-test-environments-intro">维护名称、访问地址和可使用该环境的测试空间。</p>
+      ) : <p className="organization-test-environments-intro">当前账号没有维护权限；可在有权限的测试空间中使用已分配环境。</p>}
+      <div className="organization-test-environment-list">
+        {environments.map((environment) => {
+          const assignedSpaces = detail.testSpaces.filter((space) => environment.testSpaceIds.includes(space.id))
+          return (
+            <article className="organization-test-environment-row" key={environment.id}>
+              <div className="organization-test-environment-main">
+                <strong>{environment.name}</strong>
+                <a href={environment.accessUrl} rel="noreferrer" target="_blank">{environment.accessUrl}<LinkSimple size={14} aria-hidden /></a>
+                <span>{assignedSpaces.length ? `已分配：${assignedSpaces.map((space) => space.name).join('、')}` : '尚未分配测试空间'}</span>
+              </div>
+              {detail.canManageTestEnvironments ? (
+                <div className="organization-test-environment-actions">
+                  <Button aria-label={`编辑测试环境 ${environment.name}`} disabled={busy} size="icon" title="编辑测试环境" type="button" variant="ghost" onClick={() => openEdit(environment)}><PencilSimple size={16} /></Button>
+                  <Button aria-label={`删除测试环境 ${environment.name}`} disabled={busy} size="icon" title="删除测试环境" type="button" variant="ghost" onClick={() => setDeleteTarget(environment)}><Trash size={16} /></Button>
+                </div>
+              ) : null}
+            </article>
+          )
+        })}
+        {environments.length === 0 ? <EmptyRow text="还没有测试环境配置" /> : null}
+      </div>
+      <TestEnvironmentEditorDialog
+        busy={busy}
+        environment={editingEnvironment}
+        open={editorOpen}
+        spaces={detail.testSpaces}
+        onOpenChange={(open) => {
+          setEditorOpen(open)
+          if (!open) setEditingEnvironment(undefined)
+        }}
+        onSave={(payload) => onMutate(() => editingEnvironment
+          ? updateOrganizationTestEnvironment(detail.id, editingEnvironment.id, payload)
+          : createOrganizationTestEnvironment(detail.id, payload))}
+      />
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open) setDeleteTarget(undefined) }}>
+        <DialogContent className="organization-test-environment-dialog">
+          <DialogHeader>
+            <DialogTitle>删除测试环境</DialogTitle>
+            <DialogDescription>
+              删除“{deleteTarget?.name}”后，新建 Bug 将不能再选择该环境；已有 Bug 会保留创建时的环境信息。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button disabled={busy} type="button" variant="outline" onClick={() => setDeleteTarget(undefined)}>取消</Button>
+            <Button
+              disabled={busy || !deleteTarget}
+              type="button"
+              variant="destructive"
+              onClick={async () => {
+                if (!deleteTarget) return
+                const saved = await onMutate(() => deleteOrganizationTestEnvironment(detail.id, deleteTarget.id))
+                if (saved) setDeleteTarget(undefined)
+              }}
+            ><Trash size={16} /> 删除环境</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  )
+}
+
+function TestEnvironmentEditorDialog({ busy, environment, onOpenChange, onSave, open, spaces }: {
+  busy: boolean
+  environment?: OrganizationTestEnvironment
+  onOpenChange: (open: boolean) => void
+  onSave: (payload: { accessUrl: string; name: string; testSpaceIds: number[] }) => Promise<boolean>
+  open: boolean
+  spaces: OrganizationDetail['testSpaces']
+}) {
+  const [name, setName] = useState('')
+  const [accessUrl, setAccessUrl] = useState('')
+  const [testSpaceIds, setTestSpaceIds] = useState<number[]>([])
+
+  useEffect(() => {
+    if (!open) return
+    setName(environment?.name ?? '')
+    setAccessUrl(environment?.accessUrl ?? '')
+    setTestSpaceIds(environment?.testSpaceIds ?? [])
+  }, [environment?.accessUrl, environment?.id, environment?.name, environment?.testSpaceIds, open])
+
+  function toggleSpace(spaceId: number, checked: boolean) {
+    setTestSpaceIds((current) => checked
+      ? Array.from(new Set([...current, spaceId]))
+      : current.filter((id) => id !== spaceId))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent fixedHeader className="organization-test-environment-dialog">
+        <DialogHeader>
+          <DialogTitle>{environment ? '编辑测试环境' : '新建测试环境'}</DialogTitle>
+          <DialogDescription>配置可访问地址，并选择可在 Bug 中下拉使用的测试空间。</DialogDescription>
+        </DialogHeader>
+        <form className="organization-test-environment-form" onSubmit={async (event) => {
+          event.preventDefault()
+          const saved = await onSave({
+            accessUrl: accessUrl.trim(),
+            name: name.trim(),
+            testSpaceIds,
+          })
+          if (saved) onOpenChange(false)
+        }}>
+          <Label>
+            环境名称
+            <Input autoFocus maxLength={120} placeholder="例如：预发布环境" value={name} onChange={(event) => setName(event.target.value)} />
+          </Label>
+          <Label>
+            访问地址
+            <Input inputMode="url" maxLength={2048} placeholder="例如：https://staging.example.com" type="url" value={accessUrl} onChange={(event) => setAccessUrl(event.target.value)} />
+          </Label>
+          <fieldset className="organization-test-environment-spaces">
+            <legend>分配测试空间</legend>
+            <p>只有分配到的空间会在 Bug 表单中显示此环境。</p>
+            <div>
+              {spaces.map((space) => (
+                <label key={space.id}>
+                  <Checkbox checked={testSpaceIds.includes(space.id)} onCheckedChange={(checked) => toggleSpace(space.id, checked === true)} />
+                  <span>
+                    <strong>{space.name}</strong>
+                    <small>{space.versionLabel ? `版本 ${space.versionLabel}` : space.ownerName}</small>
+                  </span>
+                </label>
+              ))}
+              {spaces.length === 0 ? <EmptyRow text="请先将测试空间归属到当前组织" /> : null}
+            </div>
+          </fieldset>
+          <DialogFooter>
+            <Button disabled={busy} type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button disabled={busy || !name.trim() || !accessUrl.trim()}>{environment ? '保存环境' : '创建环境'}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 

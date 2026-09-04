@@ -355,7 +355,7 @@ The schema is normalized around these groups:
   mentioned users receive a personal Feishu message (never the project chat).
 - Testing: `test_spaces`, pending/active memberships, expiring invite links, test subjects,
   case folders and cases, space-level test plans with selected test subjects and immutable
-  case snapshots, bugs, and bug comments.
+  case snapshots, reusable organization test environments, Bugs, and Bug comments.
   Test spaces are an owner-managed authorization boundary independent from projects.
   Test subjects describe the tested object itself and record their creator; only that
   creator may delete the subject and its cascading test data. Test plans may optionally
@@ -365,6 +365,15 @@ The schema is normalized around these groups:
   snapshot, or delete the plan. Test-case archiving means promoting a functional case
   into a baseline case; it no longer creates a new case version. Deleting a plan
   preserves existing bugs while clearing their plan association.
+  Test environments belong to one organization, store encrypted names and access URLs,
+  and are assigned to one or more organization-owned test spaces through an explicit
+  relation. A Bug may reference only an environment assigned to its own space; database
+  constraints clear that reference when an assignment or environment is removed while its
+  encrypted environment snapshot remains readable. Only an account with the additive
+  `organization_admin` role and active owner/admin organization membership may maintain
+  environments. Bug deletion stays creator-owned and requires direct current test-space
+  membership. A test-space owner or a direct member who created a Bug in that space may
+  change its version label; that narrow permission does not permit other space settings.
 
 Foreign keys define deletion behavior. Deleting an AI conversation first records its UUID in a
 tombstone, then cascades its turns and attachments; saved summaries and processed proposal

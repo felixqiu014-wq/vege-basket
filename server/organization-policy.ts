@@ -54,6 +54,35 @@ export function canManageOrganizationWeeklyReports(
   return canManageOrganization(role, assignedRoles)
 }
 
+/** Environment maintenance changes organization-wide test resources. */
+export function canManageTestEnvironments(
+  role: OrganizationAccessRole | null,
+  assignedRoles: readonly string[],
+) {
+  return (role === 'owner' || role === 'admin') && assignedRoles.includes('organization_admin')
+}
+
+export function normalizeTestEnvironmentName(value: unknown) {
+  const name = String(value ?? '').trim()
+  return name && name.length <= 120 ? name : null
+}
+
+export function normalizeTestEnvironmentAccessUrl(value: unknown) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.length > 2048 || Array.from(raw).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return codePoint <= 0x20 || (codePoint >= 0x7f && codePoint <= 0x9f)
+  })) return null
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return null
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return null
+  return parsed.toString()
+}
+
 export function isOrganizationTodoFieldUpdate(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const keys = Object.keys(value)

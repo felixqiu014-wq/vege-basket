@@ -98,11 +98,21 @@ psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
   --file=server/migrations/20260828_organization_package_market_policy_shared_selection.sql
 psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
   --file=server/migrations/20260902_organization_package_market_rule_overrides.sql
+psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
+  --file=server/migrations/20260904_test_environments.sql
 ```
 
 Future changes that need data transformation, destructive cleanup, or incompatible behavior
 still require an explicit migration and release plan; `schemaSql` is not a substitute for those
 operations.
+
+The test-environment release adds `test_environments`, `test_environment_spaces`, and the
+nullable `test_bugs.test_environment_id` relationship. The forward-only migration is
+`server/migrations/20260904_test_environments.sql`; it is compatible with legacy Bugs because
+their encrypted `environment` text remains the fallback snapshot. Apply it only after an
+approved backup against the intended database, then deploy code that understands the new
+relationship. Do not run `db:encrypt-existing` against production merely to validate this
+release: it is only needed for any legacy plaintext environment rows and is a mutating action.
 
 `npm run db:init` applies the current idempotent schema. `npm run db:encrypt-existing`
 applies the schema and encrypts supported legacy plaintext fields. Both are mutating

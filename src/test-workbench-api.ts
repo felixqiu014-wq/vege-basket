@@ -51,6 +51,13 @@ export function updateTestSpace(spaceId: number, payload: { name: string; organi
   })
 }
 
+export function updateTestSpaceVersion(spaceId: number, versionLabel: string) {
+  return request<TestWorkbenchData>(`/api/test-spaces/${spaceId}/version`, {
+    method: 'PATCH',
+    body: JSON.stringify({ versionLabel }),
+  })
+}
+
 export function importTestSpaceData(
   targetSpaceId: number,
   sources: TestSpaceImportSource[],
@@ -339,6 +346,7 @@ export function createTestBug(spaceId: number, payload: {
   priority: Priority
   reproductionSteps: string
   severity: BugSeverity
+  testEnvironmentId?: number | null
   testPlanCaseId?: number
   testPlanId?: number
   testSubjectId: number
@@ -359,12 +367,19 @@ export function updateTestBug(spaceId: number, bugId: number, payload: {
   reproductionSteps?: string
   severity?: BugSeverity
   status?: BugStatus
+  testEnvironmentId?: number | null
   testSubjectId?: number
   title?: string
 }) {
   return request<TestWorkbenchData>(`/api/test-spaces/${spaceId}/bugs/${bugId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  })
+}
+
+export function deleteTestBug(spaceId: number, bugId: number) {
+  return request<TestWorkbenchData>(`/api/test-spaces/${spaceId}/bugs/${bugId}`, {
+    method: 'DELETE',
   })
 }
 

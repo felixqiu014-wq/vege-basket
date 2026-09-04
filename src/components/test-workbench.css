@@ -1060,12 +1060,70 @@
   color: var(--foreground);
 }
 
+.test-environment-preview {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted-text);
+  font-size: 12px;
+}
+
+.test-environment-preview > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-environment-preview strong {
+  overflow: hidden;
+  color: var(--strong);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-environment-preview a,
+.test-environment-link {
+  color: color-mix(in oklch, var(--brand) 78%, var(--strong));
+  text-decoration: none;
+}
+
+.test-environment-preview a {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.test-environment-preview a:hover,
+.test-environment-link:hover {
+  text-decoration: underline;
+}
+
+.test-environment-link {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .test-case-detail-meta {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .test-bug-detail-meta {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .assigned-bug-detail-meta {

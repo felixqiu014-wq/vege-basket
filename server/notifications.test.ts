@@ -351,7 +351,7 @@ test('delivers watched todo notifications only to the individual Feishu target',
 
 test('routes Bug assignments to the developer and only project-linked Bugs to project chat', () => {
   assert.equal(shouldDeliverNotificationToProjectChat('test_bug_assigned'), true)
-  assert.equal((testWorkbenchSource.match(/onTestBugAssigned\(\{/g) ?? []).length, 3)
+  assert.equal((testWorkbenchSource.match(/onTestBugAssigned\(/g) ?? []).length, 3)
   assert.match(serverSource, /left join projects project on project\.id = plan\.project_id/)
   assert.match(serverSource, /candidate\.projectId <= 0/)
   assert.match(serverSource, /kind: 'test_bug_assigned'/)

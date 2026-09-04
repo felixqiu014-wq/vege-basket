@@ -3,8 +3,10 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   canDeleteTestCase,
+  canDeleteTestBug,
   canDeleteTestSubject,
   canEditTestBug,
+  canEditTestSpaceVersion,
   canEditTestSubject,
   canDeveloperRejectBug,
   canDeveloperSetBugStatus,
@@ -103,13 +105,13 @@ test('bug status and comment kind checks include pending confirmation and reject
 })
 
 test('returning a Bug to pending confirmation keeps the status change notification', () => {
-  assert.match(testWorkbenchSource, /status === 'pending_verification' \|\| \(status === 'pending_confirmation' && currentBug\.status !== 'new'\)/u)
+  assert.match(testWorkbenchSource, /(status|lockedStatus) === 'pending_verification'\s*\|\|\s*\((?:status|lockedStatus) === 'pending_confirmation'\s*&&\s*(?:currentBug|lockedBug)\.status\s*!==\s*'new'\)/u)
   assert.match(testWorkbenchSource, /b\.status not in \('closed', 'rejected'\)/u)
   assert.match(testWorkbenchSource, /!\[['"]closed['"], ['"]rejected['"]\]\.includes\(row\.status\)/u)
 })
 
 test('assigned Bugs start in pending confirmation and reject writes a system comment', () => {
-  assert.match(testWorkbenchSource, /const status = assigneeUserId \? 'pending_confirmation' : 'new'/u)
+  assert.match(testWorkbenchSource, /const status(?:: BugStatus)? = assigneeUserId \? 'pending_confirmation' : 'new'/u)
   assert.match(testWorkbenchSource, /status = 'pending_confirmation', updated_at = now\(\)/u)
   const rejectRouteStart = testWorkbenchSource.indexOf("router.post('/test-bugs/:bugId/assigned/reject'")
   assert.ok(rejectRouteStart >= 0)
@@ -254,6 +256,51 @@ test('only the Bug creator can edit Bug details', () => {
   assert.equal(canEditTestBug(42, 42), true)
   assert.equal(canEditTestBug(42, 7), false)
   assert.equal(canEditTestBug(null, 7), false)
+})
+
+test('Bug deletion and test-space version editing stay creator/owner scoped', () => {
+  assert.equal(canDeleteTestBug(42, 42), true)
+  assert.equal(canDeleteTestBug(42, 7), false)
+  assert.equal(canDeleteTestBug(null, 42), false)
+  assert.equal(canEditTestSpaceVersion(7, null, 7), true)
+  assert.equal(canEditTestSpaceVersion(7, 42, 42), true)
+  assert.equal(canEditTestSpaceVersion(7, 42, 8), false)
+  assert.equal(canEditTestSpaceVersion(null, 42, 42), true)
+})
+
+test('Bug deletion and version routes recheck direct membership and keep mutations scoped', () => {
+  const versionStart = testWorkbenchSource.indexOf("router.patch('/test-spaces/:spaceId/version'")
+  const spaceDeleteStart = testWorkbenchSource.indexOf("router.delete('/test-spaces/:spaceId'", versionStart)
+  const bugDeleteStart = testWorkbenchSource.indexOf("router.delete('/test-spaces/:spaceId/bugs/:bugId'")
+  const commentsStart = testWorkbenchSource.indexOf("router.post('/test-spaces/:spaceId/bugs/:bugId/comments'", bugDeleteStart)
+  assert.ok(versionStart >= 0)
+  assert.ok(spaceDeleteStart > versionStart)
+  assert.ok(bugDeleteStart >= 0)
+  assert.ok(commentsStart > bugDeleteStart)
+  const versionRoute = testWorkbenchSource.slice(versionStart, spaceDeleteStart)
+  const bugDeleteRoute = testWorkbenchSource.slice(bugDeleteStart, commentsStart)
+  assert.match(versionRoute, /requireActiveRole\(request, response, 'tester'\)/u)
+  assert.match(versionRoute, /getDirectSpaceAccess\(spaceId, session\.userId, client\)/u)
+  assert.match(versionRoute, /from test_bugs[\s\S]*reporter_user_id = \$2[\s\S]*for share/u)
+  assert.match(versionRoute, /canEditTestSpaceVersion/u)
+  assert.match(versionRoute, /set version_label = \$1, updated_at = now\(\)/u)
+  assert.match(bugDeleteRoute, /getDirectSpaceAccess\(spaceId, session\.userId, client\)/u)
+  assert.match(bugDeleteRoute, /canDeleteTestBug/u)
+  assert.match(bugDeleteRoute, /delete from notification_deliveries/u)
+  assert.match(bugDeleteRoute, /delete from notification_states/u)
+  assert.match(bugDeleteRoute, /delete from test_bugs where id = \$1 and test_space_id = \$2/u)
+})
+
+test('configured test environments are restricted to assigned spaces and preserve Bug snapshots', () => {
+  assert.match(schemaSource, /create table if not exists test_environments/u)
+  assert.match(schemaSource, /create table if not exists test_environment_spaces/u)
+  assert.match(schemaSource, /test_environment_id bigint references test_environments\(id\)/u)
+  assert.match(schemaSource, /foreign key \(test_environment_id, test_space_id\)\s+references test_environment_spaces/u)
+  assert.match(testWorkbenchSource, /getAssignedTestEnvironment\(/u)
+  assert.match(testWorkbenchSource, /Test environment is not configured for this test space/u)
+  assert.match(testWorkbenchSource, /environmentSnapshot\(/u)
+  assert.match(testWorkbenchClientSource, /environments\.map\(\(item\) => <SelectItem/u)
+  assert.match(testWorkbenchClientSource, /手工填写环境/u)
 })
 
 test('only the test subject creator can edit or delete it', () => {

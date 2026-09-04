@@ -782,6 +782,43 @@ export function attachTestSpaceToOrganization(organizationId: number, spaceId: n
   })
 }
 
+export type OrganizationTestEnvironmentPayload = {
+  accessUrl: string
+  name: string
+  testSpaceIds: number[]
+}
+
+export function createOrganizationTestEnvironment(
+  organizationId: number,
+  payload: OrganizationTestEnvironmentPayload,
+) {
+  return request<OrganizationDetail>(`/api/organizations/${organizationId}/test-environments`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateOrganizationTestEnvironment(
+  organizationId: number,
+  environmentId: number,
+  payload: OrganizationTestEnvironmentPayload,
+) {
+  return request<OrganizationDetail>(
+    `/api/organizations/${organizationId}/test-environments/${environmentId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function deleteOrganizationTestEnvironment(organizationId: number, environmentId: number) {
+  return request<OrganizationDetail>(
+    `/api/organizations/${organizationId}/test-environments/${environmentId}`,
+    { method: 'DELETE' },
+  )
+}
+
 export function saveOrganizationWeeklyReport(
   organizationId: number,
   weekStart: string,

@@ -8,12 +8,15 @@ import {
   canManageOrganization,
   canManageOrganizationProjects,
   canManageOrganizationWeeklyReports,
+  canManageTestEnvironments,
   hashOrganizationInviteToken,
   hashProjectTransferToken,
   isFreshFeishuTimestamp,
   isOrganizationAccessRole,
   matchesOrganizationDeleteConfirmation,
   normalizeOrganizationName,
+  normalizeTestEnvironmentAccessUrl,
+  normalizeTestEnvironmentName,
   normalizeOrganizationProjectHealthStatus,
   normalizeOrganizationProjectStatus,
   normalizeOrganizationWeekStart,
@@ -74,6 +77,21 @@ function asyncRoute(
 ) {
   return (request: express.Request, response: express.Response, next: express.NextFunction) => {
     handler(request, response).catch(next)
+  }
+}
+
+async function transaction<T>(handler: (client: PoolClient) => Promise<T>) {
+  const client = await pool.connect()
+  try {
+    await client.query('begin')
+    const result = await handler(client)
+    await client.query('commit')
+    return result
+  } catch (error) {
+    await client.query('rollback')
+    throw error
+  } finally {
+    client.release()
   }
 }
 
@@ -150,6 +168,21 @@ async function requireOrganizationAdmin(
   const assignedRoles = await getAssignedRoles(userId)
   if (!canManageOrganization(membership.access_role, assignedRoles)) {
     response.status(403).json({ error: 'Organization administrator access is required' })
+    return null
+  }
+  return membership
+}
+
+async function requireTestEnvironmentManager(
+  response: express.Response,
+  organizationId: number | null,
+  userId: number,
+) {
+  const membership = await requireOrganizationMember(response, organizationId, userId)
+  if (!membership) return null
+  const assignedRoles = await getAssignedRoles(userId)
+  if (!canManageTestEnvironments(membership.access_role, assignedRoles)) {
+    response.status(403).json({ error: 'Organization test-environment manager access is required' })
     return null
   }
   return membership
@@ -235,6 +268,7 @@ async function lockManagedOrganization(
     join user_roles role
       on role.user_id = $2 and role.role = 'organization_admin'
     where o.id = $1 and m.user_id = $2 and m.status = 'active'
+      and m.access_role in ('owner', 'admin')
     for update of o, m, role
     `,
     [organizationId, userId],
@@ -396,7 +430,7 @@ async function getOrganizationDetail(organizationId: number, userId: number) {
   const canManage = canManageOrganization(membership.access_role, assignedRoles)
   const canManageProjects = canManageOrganizationProjects(membership.access_role, assignedRoles)
   const canManageWeeklyReports = canManageOrganizationWeeklyReports(membership.access_role, assignedRoles)
-  const [organization, members, projects, projectMemberships, milestones, testSpaces, todos, packageEvents, bugs, reports, summaries, invitations, attachableProjects, attachableTestSpaces, packageMarketPolicy] = await Promise.all([
+  const [organization, members, projects, projectMemberships, milestones, testSpaces, testEnvironments, todos, packageEvents, bugs, reports, summaries, invitations, attachableProjects, attachableTestSpaces, packageMarketPolicy] = await Promise.all([
     query<{
       created_at: Date
       id: string
@@ -544,9 +578,10 @@ async function getOrganizationDetail(organizationId: number, userId: number) {
       owner_email: string
       plan_count: string
       updated_at: Date
+      version_label: string | null
     }>(
       `
-      select s.id, s.name, s.updated_at, owner.email as owner_email,
+      select s.id, s.name, s.version_label, s.updated_at, owner.email as owner_email,
         owner.display_name as owner_display_name,
         count(distinct p.id) as plan_count,
         count(distinct b.id) as bug_count
@@ -562,6 +597,28 @@ async function getOrganizationDetail(organizationId: number, userId: number) {
       `,
       [organizationId, canManageProjects, userId],
     ),
+    canManageTestEnvironments(membership.access_role, assignedRoles) ? query<{
+      access_url: string
+      created_at: Date
+      id: string
+      name: string
+      test_space_ids: number[]
+      updated_at: Date
+    }>(
+      `
+      select environment.id, environment.name, environment.access_url,
+        environment.created_at, environment.updated_at,
+        coalesce(array_agg(assignment.test_space_id order by assignment.test_space_id)
+          filter (where assignment.test_space_id is not null), '{}') as test_space_ids
+      from test_environments environment
+      left join test_environment_spaces assignment
+        on assignment.test_environment_id = environment.id
+      where environment.organization_id = $1
+      group by environment.id
+      order by environment.updated_at desc, environment.id desc
+      `,
+      [organizationId],
+    ) : Promise.resolve({ rows: [] }),
     query<{
       assignee_display_name: string | null
       assignee_email: string | null
@@ -833,6 +890,7 @@ async function getOrganizationDetail(organizationId: number, userId: number) {
     })),
     canManage,
     canManageProjects,
+    canManageTestEnvironments: canManageTestEnvironments(membership.access_role, assignedRoles),
     canManageWeeklyReports,
     createdAt: row.created_at.toISOString(),
     id: Number(row.id),
@@ -884,6 +942,14 @@ async function getOrganizationDetail(organizationId: number, userId: number) {
       sourceReportCount: summary.source_report_count,
       weekStart: dateOnly(summary.week_start),
     })),
+    testEnvironments: testEnvironments.rows.map((environment) => ({
+      accessUrl: decryptText(environment.access_url),
+      createdAt: environment.created_at.toISOString(),
+      id: Number(environment.id),
+      name: decryptText(environment.name),
+      testSpaceIds: (environment.test_space_ids ?? []).map((id) => Number(id)),
+      updatedAt: environment.updated_at.toISOString(),
+    })),
     tasks: taskRows.slice(0, 200),
     testSpaces: testSpaces.rows.map((space) => ({
       bugCount: Number(space.bug_count),
@@ -892,6 +958,7 @@ async function getOrganizationDetail(organizationId: number, userId: number) {
       ownerName: String(space.owner_display_name || space.owner_email),
       planCount: Number(space.plan_count),
       updatedAt: space.updated_at.toISOString(),
+      versionLabel: space.version_label ? decryptText(space.version_label) : undefined,
     })),
     weeklyReportRules: normalizeWeeklyReportRules({
       closeDay: row.weekly_report_close_day,
@@ -1764,6 +1831,213 @@ export function createOrganizationRouter(dependencies: OrganizationRouterDepende
       client.release()
     }
     response.json(await getOrganizationDetail(organizationId!, session.userId))
+  }))
+
+  function parseTestEnvironmentSpaceIds(value: unknown) {
+    if (value === undefined) return []
+    if (!Array.isArray(value) || value.length > 1_000) return null
+    const ids = Array.from(new Set(value.map(positiveId)))
+    return ids.every((id): id is number => id !== null) ? ids : null
+  }
+
+  async function respondWithOrganizationDetail(
+    response: express.Response,
+    organizationId: number,
+    userId: number,
+  ) {
+    const detail = await getOrganizationDetail(organizationId, userId)
+    if (!detail) {
+      response.status(404).json({ error: 'Organization not found' })
+      return false
+    }
+    response.json(detail)
+    return true
+  }
+
+  router.post('/organizations/:organizationId/test-environments', asyncRoute(async (request, response) => {
+    const session = await requireSession(request, response)
+    if (!session) return
+    const organizationId = positiveId(request.params.organizationId)
+    if (!(await requireTestEnvironmentManager(response, organizationId, session.userId))) return
+    const name = normalizeTestEnvironmentName(request.body?.name)
+    const accessUrl = normalizeTestEnvironmentAccessUrl(request.body?.accessUrl)
+    const testSpaceIds = parseTestEnvironmentSpaceIds(request.body?.testSpaceIds)
+    if (!name || !accessUrl || !testSpaceIds) {
+      response.status(400).json({ error: 'Environment name, access URL, and spaces must be valid' })
+      return
+    }
+    try {
+      await transaction(async (client) => {
+        const organization = await lockManagedOrganization(client, organizationId!, session.userId)
+        if (!organization) throw Object.assign(new Error('Organization access changed, reload and try again'), { status: 409 })
+        if (testSpaceIds.length > 0) {
+          const spaces = await client.query<{ id: string }>(
+            `select id from test_spaces
+             where organization_id = $1 and id = any($2::bigint[])
+             order by id for update`,
+            [organizationId, testSpaceIds],
+          )
+          if (spaces.rows.length !== testSpaceIds.length) {
+            throw Object.assign(new Error('All assigned test spaces must belong to this organization'), { status: 409 })
+          }
+        }
+        const inserted = await client.query<{ id: string }>(
+          `insert into test_environments
+             (organization_id, name, name_lookup, access_url, created_by_user_id)
+           values ($1, $2, $3, $4, $5)
+           returning id`,
+          [organizationId, encryptText(name), blindIndex(name), encryptText(accessUrl), session.userId],
+        )
+        const environmentId = Number(inserted.rows[0].id)
+        for (const spaceId of testSpaceIds) {
+          await client.query(
+            `insert into test_environment_spaces (test_environment_id, test_space_id)
+             values ($1, $2)`,
+            [environmentId, spaceId],
+          )
+        }
+        await writeAudit(
+          client,
+          organizationId!,
+          session.userId,
+          'test_environment.created',
+          'test_environment',
+          String(environmentId),
+          JSON.stringify({ name, accessUrl, testSpaceIds }),
+        )
+      })
+    } catch (error) {
+      if (databaseErrorCode(error) === '23505') {
+        response.status(409).json({ error: 'An environment with this name already exists' })
+        return
+      }
+      if (error instanceof Error && 'status' in error) {
+        response.status(Number((error as Error & { status: number }).status)).json({ error: error.message })
+        return
+      }
+      throw error
+    }
+    await respondWithOrganizationDetail(response, organizationId!, session.userId)
+  }))
+
+  router.patch('/organizations/:organizationId/test-environments/:environmentId', asyncRoute(async (request, response) => {
+    const session = await requireSession(request, response)
+    if (!session) return
+    const organizationId = positiveId(request.params.organizationId)
+    const environmentId = positiveId(request.params.environmentId)
+    if (!(await requireTestEnvironmentManager(response, organizationId, session.userId)) || !environmentId) return
+    const name = normalizeTestEnvironmentName(request.body?.name)
+    const accessUrl = normalizeTestEnvironmentAccessUrl(request.body?.accessUrl)
+    const testSpaceIds = parseTestEnvironmentSpaceIds(request.body?.testSpaceIds)
+    if (!name || !accessUrl || !testSpaceIds) {
+      response.status(400).json({ error: 'Environment name, access URL, and spaces must be valid' })
+      return
+    }
+    try {
+      await transaction(async (client) => {
+        const organization = await lockManagedOrganization(client, organizationId!, session.userId)
+        if (!organization) throw Object.assign(new Error('Organization access changed, reload and try again'), { status: 409 })
+        const existing = await client.query<{ id: string }>(
+          `select id from test_environments where id = $1 and organization_id = $2 for update`,
+          [environmentId, organizationId],
+        )
+        if (!existing.rows[0]) throw Object.assign(new Error('Test environment not found'), { status: 404 })
+        if (testSpaceIds.length > 0) {
+          const spaces = await client.query<{ id: string }>(
+            `select id from test_spaces
+             where organization_id = $1 and id = any($2::bigint[])
+             order by id for update`,
+            [organizationId, testSpaceIds],
+          )
+          if (spaces.rows.length !== testSpaceIds.length) {
+            throw Object.assign(new Error('All assigned test spaces must belong to this organization'), { status: 409 })
+          }
+        }
+        await client.query(
+          `update test_environments
+           set name = $1, name_lookup = $2, access_url = $3, updated_at = now()
+           where id = $4 and organization_id = $5`,
+          [encryptText(name), blindIndex(name), encryptText(accessUrl), environmentId, organizationId],
+        )
+        if (testSpaceIds.length > 0) {
+          await client.query(
+            `delete from test_environment_spaces
+             where test_environment_id = $1
+               and not (test_space_id = any($2::bigint[]))`,
+            [environmentId, testSpaceIds],
+          )
+        } else {
+          await client.query(
+            'delete from test_environment_spaces where test_environment_id = $1',
+            [environmentId],
+          )
+        }
+        for (const spaceId of testSpaceIds) {
+          await client.query(
+            `insert into test_environment_spaces (test_environment_id, test_space_id)
+             values ($1, $2)
+             on conflict (test_environment_id, test_space_id) do nothing`,
+            [environmentId, spaceId],
+          )
+        }
+        await writeAudit(
+          client,
+          organizationId!,
+          session.userId,
+          'test_environment.updated',
+          'test_environment',
+          String(environmentId),
+          JSON.stringify({ name, accessUrl, testSpaceIds }),
+        )
+      })
+    } catch (error) {
+      if (databaseErrorCode(error) === '23505') {
+        response.status(409).json({ error: 'An environment with this name already exists' })
+        return
+      }
+      if (error instanceof Error && 'status' in error) {
+        response.status(Number((error as Error & { status: number }).status)).json({ error: error.message })
+        return
+      }
+      throw error
+    }
+    await respondWithOrganizationDetail(response, organizationId!, session.userId)
+  }))
+
+  router.delete('/organizations/:organizationId/test-environments/:environmentId', asyncRoute(async (request, response) => {
+    const session = await requireSession(request, response)
+    if (!session) return
+    const organizationId = positiveId(request.params.organizationId)
+    const environmentId = positiveId(request.params.environmentId)
+    if (!(await requireTestEnvironmentManager(response, organizationId, session.userId)) || !environmentId) return
+    try {
+      await transaction(async (client) => {
+        const organization = await lockManagedOrganization(client, organizationId!, session.userId)
+        if (!organization) throw Object.assign(new Error('Organization access changed, reload and try again'), { status: 409 })
+        const deleted = await client.query<{ id: string }>(
+          `delete from test_environments
+           where id = $1 and organization_id = $2
+           returning id`,
+          [environmentId, organizationId],
+        )
+        if (!deleted.rows[0]) throw Object.assign(new Error('Test environment not found'), { status: 404 })
+        await writeAudit(
+          client,
+          organizationId!,
+          session.userId,
+          'test_environment.deleted',
+          'test_environment',
+          String(environmentId),
+        )
+      })
+    } catch (error) {
+      if (error instanceof Error && 'status' in error) {
+        response.status(Number((error as Error & { status: number }).status)).json({ error: error.message })
+        return
+      }
+      throw error
+    }
+    await respondWithOrganizationDetail(response, organizationId!, session.userId)
   }))
 
   router.post('/organizations/:organizationId/projects/:projectId', asyncRoute(async (request, response) => {

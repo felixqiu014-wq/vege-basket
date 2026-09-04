@@ -23,6 +23,7 @@ The current migrations are:
 | `20260828_organization_package_market_policy.sql` | Adds organization feature settings, independent release/CI package-market policies, selected rule rows, and the lookup index. |
 | `20260828_organization_package_market_policy_excluded_mode.sql` | Extends the channel-policy mode constraint with the `excluded` deny-list mode. |
 | `20260828_organization_package_market_policy_shared_selection.sql` | Adds one canonical organization-wide visibility range and safely derives it from legacy channel policies without broadening package access. |
+| `20260904_test_environments.sql` | Adds reusable encrypted organization test environments, space assignments, and nullable Bug environment references with assignment integrity. |
 
 For the organization package-market policy release, update the image only. API startup applies
 the matching idempotent `schemaSql` definition, so no manual `psql` or `db:init` run is required.
@@ -40,6 +41,8 @@ psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
   --file=server/migrations/20260828_organization_package_market_policy_excluded_mode.sql
 psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
   --file=server/migrations/20260828_organization_package_market_policy_shared_selection.sql
+psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 \
+  --file=server/migrations/20260904_test_environments.sql
 ```
 
 The files are wrapped in one transaction and remain append-only structural records. The
